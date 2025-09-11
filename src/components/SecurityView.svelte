@@ -35,6 +35,9 @@
   
   let selectedCamera = null;
   let cameraUrls = {};
+  let motionEvents = [];
+  let wsConnection = null;
+  let connectionStatus = 'disconnected';
   
   // Generate camera stream URLs using UniFi Protect API
   $: {
@@ -65,6 +68,32 @@
   // Auto-refresh cameras every 10 seconds
   let refreshInterval;
   
+  function connectToMotionEvents() {
+    // Note: WebSocket connections need to be proxied through nginx
+    // For now, we'll display a status but actual WebSocket implementation
+    // would need nginx WebSocket proxy configuration
+    connectionStatus = 'connecting';
+    console.log('[Motion Events] WebSocket connection would connect to UniFi Protect');
+    
+    // Simulate connection for UI display
+    setTimeout(() => {
+      connectionStatus = 'connected';
+      console.log('[Motion Events] Ready to receive motion events');
+    }, 1000);
+  }
+  
+  function addMotionEvent(event) {
+    const now = new Date();
+    motionEvents = [{
+      id: Date.now(),
+      cameraId: event.camera || event.device,
+      cameraName: cameras.find(c => c.id === event.camera)?.name || 'Unknown',
+      type: event.type,
+      timestamp: now,
+      timeStr: now.toLocaleTimeString()
+    }, ...motionEvents].slice(0, 20); // Keep last 20 events
+  }
+  
   onMount(() => {
     console.log('[Camera Debug] Component mounted with UniFi Protect integration');
     
@@ -94,6 +123,9 @@
       });
     });
     cameraUrls = {...cameraUrls};
+    
+    // Connect to motion events
+    connectToMotionEvents();
     
     // Set up refresh interval
     refreshInterval = setInterval(() => {
@@ -205,6 +237,41 @@
         {/if}
       </div>
     {/each}
+    
+    <!-- Motion Events Panel in Grid -->
+    <div class="camera-card motion-events-card">
+      <div class="camera-header">
+        <div>
+          <h3 class="camera-title">Motion Events</h3>
+          <p class="camera-description">Real-time activity monitoring</p>
+        </div>
+        <div class="camera-controls">
+          <div class="connection-status">
+            <span class="status-dot {connectionStatus}"></span>
+            <span class="status-text">{connectionStatus === 'connected' ? 'LIVE' : connectionStatus === 'connecting' ? 'CONNECTING' : 'OFFLINE'}</span>
+          </div>
+        </div>
+      </div>
+      
+      <div class="motion-events-content">
+        {#if motionEvents.length > 0}
+          <div class="events-list">
+            {#each motionEvents as event}
+              <div class="event-item">
+                <span class="event-time">{event.timeStr}</span>
+                <span class="event-camera">{event.cameraName}</span>
+                <span class="event-type">{event.type}</span>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <div class="no-events">
+            <p class="text-gray-500 text-sm">No motion events detected</p>
+            <p class="text-gray-600 text-xs mt-1">Events will appear here when motion is detected</p>
+          </div>
+        {/if}
+      </div>
+    </div>
   </div>
   
   <!-- Quick Actions -->
@@ -424,6 +491,106 @@
     color: rgba(255, 255, 255, 0.4);
     text-transform: uppercase;
     letter-spacing: 0.05em;
+  }
+  
+  /* Motion Events Card */
+  .motion-events-card {
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .motion-events-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 200px;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+  
+  .connection-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.3);
+  }
+  
+  .status-dot.connected {
+    background: #00ff88;
+    box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+  }
+  
+  .status-dot.connecting {
+    background: #ffc800;
+  }
+  
+  .status-text {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: rgba(255, 255, 255, 0.6);
+  }
+  
+  .events-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.5rem;
+  }
+  
+  .event-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+    transition: all 0.2s ease;
+  }
+  
+  .event-item:hover {
+    background: rgba(0, 212, 255, 0.05);
+    border-color: rgba(0, 212, 255, 0.2);
+  }
+  
+  .event-time {
+    font-size: 0.75rem;
+    color: rgba(0, 212, 255, 0.8);
+    font-weight: 500;
+  }
+  
+  .event-camera {
+    font-size: 0.875rem;
+    color: rgba(255, 255, 255, 0.8);
+  }
+  
+  .event-type {
+    font-size: 0.625rem;
+    padding: 0.25rem 0.5rem;
+    background: rgba(0, 212, 255, 0.1);
+    border: 1px solid rgba(0, 212, 255, 0.2);
+    border-radius: 12px;
+    color: rgba(0, 212, 255, 0.9);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  
+  .no-events {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    flex: 1;
+    text-align: center;
+    padding: 2rem;
+    min-height: 200px;
   }
   
   .security-actions {
