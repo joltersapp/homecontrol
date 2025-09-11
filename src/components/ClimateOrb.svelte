@@ -30,7 +30,7 @@
     <!-- Animated gradient background -->
     <div 
       class="absolute inset-0 rounded-full"
-      style="background: conic-gradient(from {rotation}deg, #3b82f6, #8b5cf6, #ec4899, #3b82f6); opacity: 0.3; filter: blur(20px);"
+      style="background: conic-gradient(from {rotation}deg, #00d4ff, #0891b2, #0284c7, #00d4ff); opacity: 0.25; filter: blur(25px);"
     ></div>
     
     <!-- Inner orb -->
@@ -68,9 +68,9 @@
       />
       <defs>
         <linearGradient id="tempGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" style="stop-color:#3b82f6" />
-          <stop offset="50%" style="stop-color:#8b5cf6" />
-          <stop offset="100%" style="stop-color:#ec4899" />
+          <stop offset="0%" style="stop-color:#00d4ff" />
+          <stop offset="50%" style="stop-color:#0891b2" />
+          <stop offset="100%" style="stop-color:#0284c7" />
         </linearGradient>
       </defs>
     </svg>
@@ -110,10 +110,12 @@
     position: relative;
     width: 16rem;
     height: 16rem;
-    background: rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(16px);
+    background: rgba(255, 255, 255, 0.02);
+    backdrop-filter: blur(20px);
     border-radius: 50%;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(0, 212, 255, 0.1);
+    box-shadow: 
+      0 25px 50px -12px rgba(0, 0, 0, 0.4),
+      inset 0 0 30px rgba(0, 212, 255, 0.05);
   }
 </style>

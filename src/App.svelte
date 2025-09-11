@@ -2,15 +2,15 @@
   import { onMount } from 'svelte';
   import { fly, fade, scale } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
-  import DataPill from './components/DataPill.svelte';
-  import MediaControl from './components/MediaControl.svelte';
   import ClimateOrb from './components/ClimateOrb.svelte';
-  import { get } from 'svelte/store';
+  import RoomControl from './components/RoomControl.svelte';
+  import AudioControl from './components/AudioControl.svelte';
   import { haStore } from './stores/haStore.js';
   
   let connected = false;
   let entities = {};
   let activeRoom = null;
+  let currentView = 'home'; // 'home' or 'audio'
   
   const unsubscribe = haStore.subscribe(state => {
     connected = state.connected;
@@ -26,85 +26,144 @@
     };
   });
   
-  // Service handlers
-  function handleBassChange(e) {
-    haStore.callService('number', 'set_value', 'number.living_room_sonos_bass', { value: e.detail });
-  }
-  
-  function handleTrebleChange(e) {
-    haStore.callService('number', 'set_value', 'number.living_room_sonos_treble', { value: e.detail });
-  }
-  
-  function handleVolumeChange(e) {
-    haStore.callService('media_player', 'volume_set', 'media_player.living_room_sonos', { 
-      volume_level: e.detail / 100 
+  // Turn off all kitchen and living room lights
+  function turnOffKitchenLivingLights() {
+    const lightsToTurnOff = [
+      'light.kitchen_light',
+      'light.left_kitchen_light',
+      'light.right_kitchen_lights',
+      'light.living_room_light',
+      'switch.family_room_lamp',
+      'switch.kichten_cabinet_light'
+    ];
+    
+    lightsToTurnOff.forEach(entityId => {
+      if (entityId.startsWith('light.')) {
+        haStore.callService('light', 'turn_off', entityId);
+      } else if (entityId.startsWith('switch.')) {
+        haStore.callService('switch', 'turn_off', entityId);
+      }
     });
   }
   
-  function toggleSubwoofer() {
-    const isOn = entities['switch.living_room_subwoofer_enabled']?.state === 'on';
-    haStore.callService('switch', isOn ? 'turn_off' : 'turn_on', 'switch.living_room_subwoofer_enabled');
-  }
-  
-  function toggleNightMode() {
-    const isOn = entities['switch.living_room_sonos_night_sound']?.state === 'on';
-    haStore.callService('switch', isOn ? 'turn_off' : 'turn_on', 'switch.living_room_sonos_night_sound');
+  // Turn ON all kitchen and living room lights
+  function turnOnKitchenLivingLights() {
+    const lightsToTurnOn = [
+      'light.kitchen_light',
+      'light.left_kitchen_light',
+      'light.right_kitchen_lights',
+      'light.living_room_light',
+      'switch.family_room_lamp',
+      'switch.kichten_cabinet_light'
+    ];
+    
+    lightsToTurnOn.forEach(entityId => {
+      if (entityId.startsWith('light.')) {
+        haStore.callService('light', 'turn_on', entityId);
+      } else if (entityId.startsWith('switch.')) {
+        haStore.callService('switch', 'turn_on', entityId);
+      }
+    });
   }
   
   const rooms = [
-    { id: 'living', name: 'Living Room', icon: '🛋️', color: 'from-blue-500 to-purple-600' },
-    { id: 'kitchen', name: 'Kitchen', icon: '🍳', color: 'from-orange-500 to-red-600' },
-    { id: 'bedroom', name: 'Bedroom', icon: '🛏️', color: 'from-purple-500 to-pink-600' },
-    { id: 'office', name: 'Office', icon: '💻', color: 'from-green-500 to-teal-600' },
-    { id: 'patio', name: 'Patio', icon: '🌿', color: 'from-teal-500 to-green-600' }
+    { 
+      id: 'living', 
+      name: 'Living Room',
+      lights: ['light.living_room_light', 'switch.family_room_lamp'],
+      media: 'media_player.living_room_sonos',
+      climate: 'climate.walkway'
+    },
+    { 
+      id: 'kitchen', 
+      name: 'Kitchen',
+      lights: ['light.kitchen_light', 'light.left_kitchen_light', 'light.right_kitchen_lights', 'switch.kichten_cabinet_light'],
+      media: 'media_player.kitchen'
+    },
+    { 
+      id: 'bedroom', 
+      name: 'Master Bedroom',
+      lights: [],
+      media: 'media_player.master_bedroom_sonos'
+    },
+    { 
+      id: 'office', 
+      name: 'Office',
+      lights: ['switch.office_lamp'],
+      fan: 'fan.office_fan'
+    },
+    { 
+      id: 'patio', 
+      name: 'Patio',
+      lights: ['light.hover_flush', 'light.hover_patio_left'],
+      fan: 'fan.hover_flush',
+      media: 'media_player.terrace'
+    }
   ];
 </script>
 
-<main class="min-h-screen bg-gradient-to-br from-gray-900 via-black to-gray-900 text-white p-4 overflow-hidden">
-  <!-- Animated Background -->
-  <div class="fixed inset-0 overflow-hidden pointer-events-none">
-    <div class="absolute -top-40 -right-40 w-80 h-80 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
-    <div class="absolute -bottom-40 -left-40 w-80 h-80 bg-blue-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-2000"></div>
-    <div class="absolute top-1/2 left-1/2 w-80 h-80 bg-pink-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-4000"></div>
+<main class="min-h-screen bg-gradient-to-b from-gray-950 via-black to-gray-950 text-gray-100">
+  <!-- Subtle animated background -->
+  <div class="fixed inset-0 overflow-hidden pointer-events-none opacity-30">
+    <div class="absolute -top-40 -right-40 w-96 h-96 bg-cyan-500/20 rounded-full filter blur-[100px] animate-drift"></div>
+    <div class="absolute -bottom-40 -left-40 w-96 h-96 bg-blue-500/20 rounded-full filter blur-[100px] animate-drift-delayed"></div>
   </div>
   
-  <div class="relative z-10 max-w-7xl mx-auto">
+  <div class="relative z-10 max-w-7xl mx-auto px-4 py-6">
     <!-- Header -->
-    <header class="mb-8" in:fly={{ y: -50, duration: 800, easing: cubicOut }}>
+    <header class="mb-8" in:fly={{ y: -20, duration: 600, easing: cubicOut }}>
       <div class="flex items-center justify-between">
-        <h1 class="text-5xl font-thin tracking-wider">
-          Home<span class="font-light text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-600">Control</span>
+        <h1 class="text-3xl font-extralight tracking-widest text-gray-100">
+          HOME<span class="text-cyan-400 font-light">CONTROL</span>
         </h1>
-        <div class="flex items-center gap-2">
-          <div class="w-2 h-2 rounded-full {connected ? 'bg-green-400' : 'bg-red-400'} animate-pulse"></div>
-          <span class="text-sm text-gray-400">{connected ? 'Connected' : 'Disconnected'}</span>
+        <div class="flex items-center gap-6">
+          <!-- Navigation -->
+          <nav class="flex gap-2">
+            <button 
+              class="nav-button {currentView === 'home' ? 'active' : ''}"
+              on:click={() => currentView = 'home'}
+            >
+              Rooms
+            </button>
+            <button 
+              class="nav-button {currentView === 'audio' ? 'active' : ''}"
+              on:click={() => currentView = 'audio'}
+            >
+              Audio
+            </button>
+          </nav>
+          <div class="flex items-center gap-3">
+            <div class="w-1.5 h-1.5 rounded-full {connected ? 'bg-cyan-400' : 'bg-red-400'} animate-pulse"></div>
+            <span class="text-xs uppercase tracking-wider text-gray-400">
+              {connected ? 'Online' : 'Offline'}
+            </span>
+          </div>
         </div>
       </div>
     </header>
 
-    <!-- Room Grid -->
-    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+    {#if currentView === 'home'}
+    <!-- Room Selector -->
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-8">
       {#each rooms as room, i}
         <button
           on:click={() => activeRoom = activeRoom === room.id ? null : room.id}
-          in:scale={{ delay: i * 50, duration: 400, easing: cubicOut }}
-          class="group relative overflow-hidden rounded-3xl p-6 backdrop-blur-lg transition-all duration-300 
-                 {activeRoom === room.id ? 'bg-white/20 scale-105 shadow-2xl' : 'bg-white/10 hover:bg-white/15'}"
+          in:scale={{ delay: i * 30, duration: 400, easing: cubicOut }}
+          class="relative group p-6 rounded-2xl transition-all duration-300
+                 {activeRoom === room.id 
+                   ? 'glass-active scale-[1.02]' 
+                   : 'glass hover:scale-[0.98]'}"
         >
-          <div class="absolute inset-0 bg-gradient-to-br {room.color} opacity-0 group-hover:opacity-20 transition-opacity duration-300"></div>
-          <div class="relative">
-            <div class="text-4xl mb-2">{room.icon}</div>
-            <div class="text-sm font-medium">{room.name}</div>
-          </div>
+          <div class="text-sm font-light tracking-wide">{room.name}</div>
           {#if activeRoom === room.id}
-            <div class="absolute top-2 right-2 w-2 h-2 bg-white rounded-full animate-pulse"></div>
+            <div class="absolute top-3 right-3 w-1 h-1 bg-cyan-400 rounded-full animate-pulse"></div>
           {/if}
         </button>
       {/each}
     </div>
 
-    <!-- Climate Orb -->
-    <div class="mb-8" in:fade={{ delay: 300, duration: 600 }}>
+    <!-- Climate Control -->
+    <div class="mb-8 flex justify-center" in:fade={{ delay: 200, duration: 600 }}>
       <ClimateOrb 
         temperature={entities['climate.walkway']?.attributes?.current_temperature || 72} 
         humidity={entities['climate.walkway']?.attributes?.current_humidity || 45} 
@@ -116,89 +175,34 @@
     </div>
 
     <!-- Active Room Controls -->
-    {#if activeRoom === 'living'}
-      <div class="space-y-6" in:fly={{ x: -100, duration: 500, easing: cubicOut }}>
-        <!-- Media Control -->
-        <MediaControl 
-          entityId="media_player.living_room_sonos"
-          roomName="Living Room"
+    {#if activeRoom}
+      <div in:fly={{ x: -50, duration: 400, easing: cubicOut }}>
+        <RoomControl 
+          room={rooms.find(r => r.id === activeRoom)}
+          {entities}
         />
-        
-        <!-- Audio Settings Pills -->
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <DataPill 
-            label="Bass"
-            value={parseFloat(entities['number.living_room_sonos_bass']?.state) || 0}
-            min={-10}
-            max={10}
-            unit=""
-            gradient="from-purple-500 to-pink-500"
-            on:change={handleBassChange}
-          />
-          <DataPill 
-            label="Treble"
-            value={parseFloat(entities['number.living_room_sonos_treble']?.state) || 0}
-            min={-10}
-            max={10}
-            unit=""
-            gradient="from-blue-500 to-cyan-500"
-            on:change={handleTrebleChange}
-          />
-          <DataPill 
-            label="Volume"
-            value={Math.round((entities['media_player.living_room_sonos']?.attributes?.volume_level || 0) * 100)}
-            min={0}
-            max={100}
-            unit="%"
-            gradient="from-green-500 to-teal-500"
-            on:change={handleVolumeChange}
-          />
-          <DataPill 
-            label="Sub"
-            value={entities['switch.living_room_subwoofer_enabled']?.state === 'on' ? 'ON' : 'OFF'}
-            toggle={true}
-            gradient="from-orange-500 to-red-500"
-            on:toggle={toggleSubwoofer}
-          />
-        </div>
-        
-        <!-- Device Pills -->
-        <div class="grid grid-cols-3 gap-4">
-          <DataPill 
-            label="Night Mode"
-            value={entities['switch.living_room_sonos_night_sound']?.state === 'on' ? 'ON' : 'OFF'}
-            toggle={true}
-            gradient="from-indigo-500 to-purple-500"
-            on:toggle={toggleNightMode}
-          />
-          <DataPill 
-            label="TV"
-            value={entities['media_player.77_oled']?.state || 'OFF'}
-            toggle={true}
-            gradient="from-gray-600 to-gray-800"
-          />
-          <DataPill 
-            label="Lights"
-            value="60%"
-            min={0}
-            max={100}
-            unit="%"
-            gradient="from-yellow-500 to-orange-500"
-          />
-        </div>
+      </div>
+    {/if}
+    {:else if currentView === 'audio'}
+      <!-- Audio Controls Page -->
+      <div in:fly={{ x: 50, duration: 400, easing: cubicOut }}>
+        <AudioControl {entities} />
       </div>
     {/if}
 
     <!-- Quick Actions -->
-    <div class="fixed bottom-6 right-6 flex flex-col gap-3">
-      <button class="glass-pill">
-        <span>🌙</span> Sleep Mode
+    <div class="fixed bottom-6 right-6 flex flex-col gap-2">
+      <button class="glass-button" on:click={turnOnKitchenLivingLights}>
+        Kitchen & Living ON
       </button>
-      <button class="glass-pill">
-        <span>🎬</span> Movie Time
+      <button class="glass-button" on:click={turnOffKitchenLivingLights}>
+        Kitchen & Living OFF
       </button>
-      <button class="glass-pill">
-        <span>💡</span> All Off
+      <button class="glass-button">
+        Sleep Mode
+      </button>
+      <button class="glass-button">
+        Away Mode
       </button>
     </div>
   </div>
@@ -208,46 +212,95 @@
   :global(body) {
     margin: 0;
     padding: 0;
-    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: black;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+    background: #0a0a0a;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
-  .glass-pill {
-    padding: 0.75rem 1.5rem;
-    background: rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(12px);
-    border-radius: 9999px;
-    font-size: 0.875rem;
-    font-weight: 500;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-    transition: all 300ms;
+  .glass {
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  }
+
+  .glass:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .glass-active {
+    background: rgba(0, 212, 255, 0.08);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(0, 212, 255, 0.2);
+    box-shadow: 0 8px 32px 0 rgba(0, 212, 255, 0.1);
+  }
+
+  .glass-button {
+    padding: 0.875rem 1.75rem;
+    background: rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    font-size: 0.8125rem;
+    font-weight: 300;
+    letter-spacing: 0.025em;
+    color: rgba(255, 255, 255, 0.9);
+    transition: all 300ms cubic-bezier(0.4, 0, 0.2, 1);
     cursor: pointer;
+    text-transform: uppercase;
   }
   
-  .glass-pill:hover {
-    background: rgba(255, 255, 255, 0.2);
+  .glass-button:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(0, 212, 255, 0.3);
+    transform: translateY(-1px);
+    box-shadow: 0 10px 20px -5px rgba(0, 212, 255, 0.2);
   }
 
-  @keyframes blob {
-    0% { transform: translate(0px, 0px) scale(1); }
-    33% { transform: translate(30px, -50px) scale(1.1); }
-    66% { transform: translate(-20px, 20px) scale(0.9); }
-    100% { transform: translate(0px, 0px) scale(1); }
+  .glass-button:active {
+    transform: scale(0.98);
+  }
+  
+  .nav-button {
+    padding: 0.5rem 1.25rem;
+    background: rgba(255, 255, 255, 0.02);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    font-size: 0.8125rem;
+    font-weight: 300;
+    letter-spacing: 0.025em;
+    color: rgba(255, 255, 255, 0.7);
+    transition: all 300ms cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+    text-transform: uppercase;
+  }
+  
+  .nav-button:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(0, 212, 255, 0.2);
+  }
+  
+  .nav-button.active {
+    background: rgba(0, 212, 255, 0.08);
+    border-color: rgba(0, 212, 255, 0.3);
+    color: #00d4ff;
   }
 
-  .animate-blob {
-    animation: blob 7s infinite;
+  @keyframes drift {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    33% { transform: translate(30px, -30px) scale(1.05); }
+    66% { transform: translate(-20px, 10px) scale(0.95); }
   }
 
-  .animation-delay-2000 {
-    animation-delay: 2s;
+  .animate-drift {
+    animation: drift 20s ease-in-out infinite;
   }
 
-  .animation-delay-4000 {
-    animation-delay: 4s;
+  .animate-drift-delayed {
+    animation: drift 20s ease-in-out infinite;
+    animation-delay: 10s;
   }
 </style>
