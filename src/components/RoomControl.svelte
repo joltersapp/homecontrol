@@ -54,7 +54,9 @@
             <div class="control-item">
               <div class="flex items-center justify-between mb-2">
                 <span class="text-sm text-gray-300">
-                  {entities[lightId].attributes?.friendly_name || lightId.split('.')[1]}
+                  {lightId === 'switch.family_room_lamp' 
+                    ? 'Living Room Lamp' 
+                    : entities[lightId].attributes?.friendly_name || lightId.split('.')[1]}
                 </span>
                 <button 
                   class="toggle-button {entities[lightId].state === 'on' ? 'active' : ''}"

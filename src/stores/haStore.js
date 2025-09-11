@@ -13,6 +13,10 @@ function createHAStore() {
 
   const connect = () => {
       const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI4ZGI0OGY3NGZhMzQ0ZTAyODZkMTNmZjEwYWFmZTFlOSIsImlhdCI6MTc1NTQ4MjI5MiwiZXhwIjoyMDcwODQyMjkyfQ.nDPugy3mk6SUHa0EnkQXQCFXv3sNFdPmPqrx9NA5t1c';
+      // Store token in localStorage for camera access
+      localStorage.setItem('ha_token', token);
+      console.log('[HAStore Debug] Token stored in localStorage:', token.substring(0, 20) + '...');
+      
       const wsUrl = 'ws://192.168.1.222:8123/api/websocket';
       
       ws = new WebSocket(wsUrl);

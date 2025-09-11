@@ -5,12 +5,14 @@
   import ClimateOrb from './components/ClimateOrb.svelte';
   import RoomControl from './components/RoomControl.svelte';
   import AudioControl from './components/AudioControl.svelte';
+  import SecurityView from './components/SecurityView.svelte';
   import { haStore } from './stores/haStore.js';
+  import { version, buildTime, buildNumber } from './version.js';
   
   let connected = false;
   let entities = {};
   let activeRoom = null;
-  let currentView = 'home'; // 'home' or 'audio'
+  let currentView = 'home'; // 'home', 'audio', or 'security'
   
   const unsubscribe = haStore.subscribe(state => {
     connected = state.connected;
@@ -70,7 +72,7 @@
     { 
       id: 'living', 
       name: 'Living Room',
-      lights: ['light.living_room_light', 'switch.family_room_lamp'],
+      lights: ['light.living_room_light', 'switch.family_room_lamp'], // Display as "Living Room Lamp"
       media: 'media_player.living_room_sonos',
       climate: 'climate.walkway'
     },
@@ -113,9 +115,17 @@
     <!-- Header -->
     <header class="mb-8" in:fly={{ y: -20, duration: 600, easing: cubicOut }}>
       <div class="flex items-center justify-between">
-        <h1 class="text-3xl font-extralight tracking-widest text-gray-100">
-          HOME<span class="text-cyan-400 font-light">CONTROL</span>
-        </h1>
+        <div class="flex items-center gap-3">
+          <h1 class="text-3xl font-extralight tracking-widest text-gray-100">
+            HOME<span class="text-cyan-400 font-light">CONTROL</span>
+          </h1>
+          <span 
+            class="text-xs text-gray-500 font-mono mt-2 cursor-help"
+            title="Build #{buildNumber} - {new Date(buildTime).toLocaleString()}"
+          >
+            v{version}
+          </span>
+        </div>
         <div class="flex items-center gap-6">
           <!-- Navigation -->
           <nav class="flex gap-2">
@@ -130,6 +140,16 @@
               on:click={() => currentView = 'audio'}
             >
               Audio
+            </button>
+            <button 
+              class="nav-button {currentView === 'security' ? 'active' : ''}"
+              on:click={() => {
+                console.log('[App Debug] Switching to security view');
+                console.log('[App Debug] Available entities:', Object.keys(entities).filter(k => k.includes('camera')));
+                currentView = 'security';
+              }}
+            >
+              Security
             </button>
           </nav>
           <div class="flex items-center gap-3">
@@ -187,6 +207,11 @@
       <!-- Audio Controls Page -->
       <div in:fly={{ x: 50, duration: 400, easing: cubicOut }}>
         <AudioControl {entities} />
+      </div>
+    {:else if currentView === 'security'}
+      <!-- Security View Page -->
+      <div in:fly={{ x: 50, duration: 400, easing: cubicOut }}>
+        <SecurityView {entities} />
       </div>
     {/if}
 
