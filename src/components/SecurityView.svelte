@@ -8,25 +8,28 @@
   console.log('[SecurityView Debug] Component initialized');
   console.log('[SecurityView Debug] Entities prop received:', entities ? Object.keys(entities).length : 'undefined');
   
-  // UniFi Protect cameras with direct API access
+  // UniFi Protect cameras with go2rtc streams
   const cameras = [
     {
       id: '689e380c00da3a03e4000428',
       name: 'Front Door',
       entity: 'camera.front_door_high_resolution_channel',
-      description: 'G4 Doorbell Pro PoE'
-    },
-    {
-      id: '689e380c01043a03e4000429',
-      name: 'East Camera',
-      entity: 'camera.house_east_high_resolution_channel',
-      description: 'East side perimeter'
+      description: 'G4 Doorbell Pro PoE',
+      streamName: 'front_door'
     },
     {
       id: '689e380c008e3a03e4000426',
       name: 'Garage Camera',
       entity: 'camera.house_west_high_resolution_channel',
-      description: 'Garage monitoring'
+      description: 'Garage monitoring',
+      streamName: 'garage'
+    },
+    {
+      id: '689e380c01043a03e4000429',
+      name: 'East Camera',
+      entity: 'camera.house_east_high_resolution_channel',
+      description: 'East side perimeter',
+      streamName: 'east_camera'
     }
   ];
   
@@ -39,14 +42,15 @@
   let wsConnection = null;
   let connectionStatus = 'disconnected';
   
-  // Generate camera stream URLs using UniFi Protect API
+  // Generate stream URLs from go2rtc
   $: {
-    console.log('[Camera URLs Debug] Reactive block triggered');
+    console.log('[Camera URLs Debug] Setting up go2rtc streams');
     cameras.forEach(camera => {
-      // Use UniFi Protect API through nginx proxy
-      const url = `/api/protect/cameras/${camera.id}/snapshot?t=${Date.now()}`;
-      console.log(`[Camera Debug] UniFi URL for ${camera.name}:`, {
+      // Use go2rtc HLS endpoint (runs on port 8888)
+      const url = `http://localhost:8888/stream.m3u8?src=${camera.streamName}`;
+      console.log(`[Camera Debug] go2rtc URL for ${camera.name}:`, {
         cameraId: camera.id,
+        streamName: camera.streamName,
         url: url
       });
       cameraUrls[camera.id] = url;
@@ -65,8 +69,10 @@
     cameraUrls = {...cameraUrls};
   }
   
-  // Auto-refresh cameras every 10 seconds
+  // Auto-refresh cameras for live streaming effect
   let refreshInterval;
+  let refreshRate = 500; // Refresh every 500ms for 2 FPS streaming
+  let streamingEnabled = true;
   
   function connectToMotionEvents() {
     // Note: WebSocket connections need to be proxied through nginx
@@ -94,50 +100,46 @@
     }, ...motionEvents].slice(0, 20); // Keep last 20 events
   }
   
-  onMount(() => {
-    console.log('[Camera Debug] Component mounted with UniFi Protect integration');
+  function initializeStreams() {
+    console.log('[Streams] Initializing direct MSE streams');
     
-    // Initial load of camera URLs using UniFi Protect API
     cameras.forEach(camera => {
-      const url = `/api/protect/cameras/${camera.id}/snapshot?t=${Date.now()}`;
-      cameraUrls[camera.id] = url;
+      const videoElement = document.getElementById(`video-${camera.id}`);
       
-      console.log(`[Camera Debug] Initial URL for ${camera.name}:`, {
-        cameraId: camera.id,
-        url: url
-      });
-      
-      // Test fetch to see if we can access the camera
-      fetch(url, {
-        method: 'GET'
-      }).then(response => {
-        console.log(`[Camera Debug] Fetch test for ${camera.name}:`, {
-          status: response.status,
-          statusText: response.statusText,
-          ok: response.ok,
-          type: response.type,
-          headers: response.headers.get('content-type')
+      if (videoElement) {
+        // Use MSE endpoint directly from go2rtc
+        const streamUrl = `http://localhost:1984/api/stream.mp4?src=${camera.streamName}`;
+        
+        console.log(`[Streams] Setting stream URL for ${camera.name}: ${streamUrl}`);
+        
+        // Set the source
+        videoElement.src = streamUrl;
+        
+        // Ensure video plays
+        videoElement.play().catch(err => {
+          console.warn(`[Streams] Auto-play blocked for ${camera.name}, user interaction may be required:`, err);
         });
-      }).catch(error => {
-        console.error(`[Camera Debug] Fetch error for ${camera.name}:`, error);
-      });
+      }
+    });
+  }
+  
+  onMount(() => {
+    console.log('[Camera Debug] Component mounted with MSE streaming');
+    
+    // Set camera URLs for initial display
+    cameras.forEach(camera => {
+      cameraUrls[camera.id] = `http://localhost:1984/api/stream.mp4?src=${camera.streamName}`;
     });
     cameraUrls = {...cameraUrls};
+    
+    // Initialize streams after DOM is ready
+    setTimeout(initializeStreams, 100);
     
     // Connect to motion events
     connectToMotionEvents();
     
-    // Set up refresh interval
-    refreshInterval = setInterval(() => {
-      console.log('[Camera Debug] Refreshing camera URLs...');
-      cameras.forEach(camera => {
-        if (entities[camera.entity]) {
-          const token = localStorage.getItem('ha_token') || '';
-          cameraUrls[camera.entity] = `http://192.168.1.222:8123/api/camera_proxy/${camera.entity}?token=${token}&t=${Date.now()}`;
-        }
-      });
-      cameraUrls = {...cameraUrls};
-    }, 10000);
+    // No need for refresh interval with HLS streams
+    // The video elements handle streaming automatically
   });
   
   onDestroy(() => {
@@ -186,33 +188,21 @@
         </div>
         
         <div class="camera-feed">
-          <!-- Using UniFi Protect API directly -->
-          <img 
-            src={cameraUrls[camera.id] || `/api/protect/cameras/${camera.id}/snapshot`}
-            alt="{camera.name} camera feed"
-            class="camera-image"
-            loading="lazy"
-            on:load={(e) => {
-              console.log(`[Camera Debug] Image loaded for ${camera.name}:`, {
-                cameraId: camera.id,
-                src: e.target.src,
-                naturalWidth: e.target.naturalWidth,
-                naturalHeight: e.target.naturalHeight
-              });
-            }}
+          <!-- Direct video element with MSE stream -->
+          <video
+            id="video-{camera.id}"
+            class="camera-image camera-stream"
+            autoplay
+            muted
+            playsinline
+            controls={false}
+            on:loadeddata={() => console.log(`[Camera] Stream loaded for ${camera.name}`)}
             on:error={(e) => {
-              console.error(`[Camera Debug] Failed to load camera ${camera.name}:`, {
-                cameraId: camera.id,
-                src: e.target.src,
-                error: e,
-                message: 'Image failed to load - check network tab for details'
-              });
-              e.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1"%3E%3Crect x="3" y="4" width="18" height="16" rx="2"/%3E%3Cpath d="M12 9v6M9 12h6"/%3E%3C/svg%3E';
+              console.error(`[Camera] Failed to load stream for ${camera.name}`, e);
             }}
-          />
-          <div class="camera-overlay">
-            <span class="status-indicator streaming">LIVE</span>
-          </div>
+          >
+            Your browser doesn't support video playback
+          </video>
         </div>
         
         <!-- Camera Details -->
@@ -422,6 +412,41 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+  
+  .camera-stream {
+    transition: opacity 200ms ease;
+  }
+  
+  .live-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    background: #ff0000;
+    border-radius: 50%;
+    margin-right: 4px;
+    animation: live-blink 2s infinite;
+  }
+  
+  @keyframes live-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  
+  .fps-indicator {
+    position: absolute;
+    top: 1rem;
+    left: 1rem;
+    padding: 0.25rem 0.5rem;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    font-size: 0.625rem;
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    color: rgba(255, 255, 255, 0.7);
+    text-transform: uppercase;
   }
   
   .camera-offline {

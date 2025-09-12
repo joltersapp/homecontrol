@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   svelte-dashboard:
     build: .
@@ -8,3 +10,26 @@ services:
       - HA_URL=http://192.168.1.222:8123
       - HA_TOKEN=${HA_TOKEN}
     restart: unless-stopped
+    depends_on:
+      - go2rtc
+    networks:
+      - streaming
+
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    container_name: go2rtc
+    restart: unless-stopped
+    ports:
+      - "1984:1984"   # API
+      - "8555:8555"   # WebRTC
+      - "8888:8888"   # HLS/MSE
+    volumes:
+      - ./go2rtc.yaml:/config/go2rtc.yaml
+    environment:
+      - CONFIG=/config/go2rtc.yaml
+    networks:
+      - streaming
+
+networks:
+  streaming:
+    driver: bridge

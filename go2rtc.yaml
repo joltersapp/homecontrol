@@ -1,0 +1,22 @@
+# go2rtc configuration for UniFi Protect cameras
+streams:
+  front_door:
+    - rtsps://192.168.1.1:7441/YyfL3xBqfxqPhbaB
+  
+  garage:
+    - rtsps://192.168.1.1:7441/vpIQMNsvjTFvbOL4
+  
+  east_camera:
+    - rtsps://192.168.1.1:7441/lIn96UL9blXDxYyF
+
+# API for web access
+api:
+  listen: ":1984"
+
+# WebRTC for low-latency browser streaming  
+webrtc:
+  listen: ":8555"
+
+# Enable MSE/HLS/MJPEG for browser compatibility
+hls:
+  listen: ":8888"

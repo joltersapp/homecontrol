@@ -13,10 +13,27 @@
   let entities = {};
   let activeRoom = null;
   let currentView = 'home'; // 'home', 'audio', or 'security'
+  let kitchenLivingLightsOn = false;
   
+  const kitchenLivingLights = [
+    'light.kitchen_light',
+    'light.left_kitchen_light',
+    'light.right_kitchen_lights',
+    'light.living_room_light',
+    'switch.family_room_lamp',
+    'switch.kichten_cabinet_light'
+  ];
+
   const unsubscribe = haStore.subscribe(state => {
     connected = state.connected;
     entities = state.entities;
+    
+    // Check if any kitchen/living lights are on
+    if (Object.keys(entities).length > 0) {
+      kitchenLivingLightsOn = kitchenLivingLights.some(entityId => 
+        entities[entityId]?.state === 'on'
+      );
+    }
   });
   
   onMount(() => {
@@ -28,42 +45,15 @@
     };
   });
   
-  // Turn off all kitchen and living room lights
-  function turnOffKitchenLivingLights() {
-    const lightsToTurnOff = [
-      'light.kitchen_light',
-      'light.left_kitchen_light',
-      'light.right_kitchen_lights',
-      'light.living_room_light',
-      'switch.family_room_lamp',
-      'switch.kichten_cabinet_light'
-    ];
+  // Toggle kitchen and living room lights
+  function toggleKitchenLivingLights() {
+    const action = kitchenLivingLightsOn ? 'turn_off' : 'turn_on';
     
-    lightsToTurnOff.forEach(entityId => {
+    kitchenLivingLights.forEach(entityId => {
       if (entityId.startsWith('light.')) {
-        haStore.callService('light', 'turn_off', entityId);
+        haStore.callService('light', action, entityId);
       } else if (entityId.startsWith('switch.')) {
-        haStore.callService('switch', 'turn_off', entityId);
-      }
-    });
-  }
-  
-  // Turn ON all kitchen and living room lights
-  function turnOnKitchenLivingLights() {
-    const lightsToTurnOn = [
-      'light.kitchen_light',
-      'light.left_kitchen_light',
-      'light.right_kitchen_lights',
-      'light.living_room_light',
-      'switch.family_room_lamp',
-      'switch.kichten_cabinet_light'
-    ];
-    
-    lightsToTurnOn.forEach(entityId => {
-      if (entityId.startsWith('light.')) {
-        haStore.callService('light', 'turn_on', entityId);
-      } else if (entityId.startsWith('switch.')) {
-        haStore.callService('switch', 'turn_on', entityId);
+        haStore.callService('switch', action, entityId);
       }
     });
   }
@@ -217,11 +207,13 @@
 
     <!-- Quick Actions -->
     <div class="fixed bottom-6 right-6 flex flex-col gap-2">
-      <button class="glass-button" on:click={turnOnKitchenLivingLights}>
-        Kitchen & Living ON
-      </button>
-      <button class="glass-button" on:click={turnOffKitchenLivingLights}>
-        Kitchen & Living OFF
+      <button 
+        class="led-toggle-button {kitchenLivingLightsOn ? 'active' : ''}" 
+        on:click={toggleKitchenLivingLights}
+      >
+        <span class="led-indicator {kitchenLivingLightsOn ? 'on' : ''}"></span>
+        Kitchen & Living
+        <span class="status-text">{kitchenLivingLightsOn ? 'ON' : 'OFF'}</span>
       </button>
       <button class="glass-button">
         Sleep Mode
@@ -286,6 +278,85 @@
 
   .glass-button:active {
     transform: scale(0.98);
+  }
+  
+  /* LED Toggle Button */
+  .led-toggle-button {
+    position: relative;
+    padding: 0.875rem 1.75rem;
+    padding-left: 3rem;
+    background: rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    font-size: 0.8125rem;
+    font-weight: 300;
+    letter-spacing: 0.025em;
+    color: rgba(255, 255, 255, 0.6);
+    transition: all 300ms cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  
+  .led-toggle-button:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+  
+  .led-toggle-button.active {
+    background: rgba(0, 212, 255, 0.1);
+    border-color: rgba(0, 212, 255, 0.3);
+    color: rgba(255, 255, 255, 0.9);
+  }
+  
+  .led-toggle-button.active:hover {
+    background: rgba(0, 212, 255, 0.15);
+    border-color: rgba(0, 212, 255, 0.4);
+  }
+  
+  .led-indicator {
+    position: absolute;
+    left: 1rem;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    transition: all 300ms ease;
+  }
+  
+  .led-indicator.on {
+    background: #00ff88;
+    box-shadow: 
+      0 0 10px rgba(0, 255, 136, 0.8),
+      0 0 20px rgba(0, 255, 136, 0.4),
+      inset 0 0 5px rgba(255, 255, 255, 0.5);
+    animation: led-pulse 2s infinite;
+  }
+  
+  @keyframes led-pulse {
+    0%, 100% { 
+      opacity: 1;
+      box-shadow: 
+        0 0 10px rgba(0, 255, 136, 0.8),
+        0 0 20px rgba(0, 255, 136, 0.4),
+        inset 0 0 5px rgba(255, 255, 255, 0.5);
+    }
+    50% { 
+      opacity: 0.8;
+      box-shadow: 
+        0 0 15px rgba(0, 255, 136, 1),
+        0 0 30px rgba(0, 255, 136, 0.6),
+        inset 0 0 5px rgba(255, 255, 255, 0.5);
+    }
+  }
+  
+  .status-text {
+    font-size: 0.75rem;
+    opacity: 0.7;
+    margin-left: auto;
   }
   
   .nav-button {
