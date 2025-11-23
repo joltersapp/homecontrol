@@ -1,0 +1,66 @@
+# Intermatic PE733P Pool/Sprinkler Control Scripts
+# Add these to your Home Assistant configuration
+
+# To use these scripts:
+# 1. Copy this entire content
+# 2. In Home Assistant, go to Settings > Automations & Scenes > Scripts
+# 3. Click "+ Add Script" > "Create new script" > Switch to YAML mode
+# 4. Paste each script separately, OR
+# 5. Add this entire file to your configuration.yaml under "script:"
+
+# Sprinkler Controls
+turn_on_sprinkler:
+  alias: "Turn On Sprinkler"
+  sequence:
+    - service: google_assistant_sdk.send_text_command
+      data:
+        command: "turn on Sprinkler"
+  mode: single
+  icon: mdi:sprinkler
+
+turn_off_sprinkler:
+  alias: "Turn Off Sprinkler"
+  sequence:
+    - service: google_assistant_sdk.send_text_command
+      data:
+        command: "turn off Sprinkler"
+  mode: single
+  icon: mdi:sprinkler
+
+# Pool Pump Controls
+turn_on_pool_pump:
+  alias: "Turn On Pool Pump"
+  sequence:
+    - service: google_assistant_sdk.send_text_command
+      data:
+        command: "turn on Pool Pump"
+  mode: single
+  icon: mdi:pump
+
+turn_off_pool_pump:
+  alias: "Turn Off Pool Pump"
+  sequence:
+    - service: google_assistant_sdk.send_text_command
+      data:
+        command: "turn off Pool Pump"
+  mode: single
+  icon: mdi:pump
+
+# Pool Light Controls
+turn_on_pool_light:
+  alias: "Turn On Pool Light"
+  sequence:
+    - service: google_assistant_sdk.send_text_command
+      data:
+        command: "turn on Pool Light"
+  mode: single
+  icon: mdi:lightbulb
+
+turn_off_pool_light:
+  alias: "Turn Off Pool Light"
+  sequence:
+    - service: google_assistant_sdk.send_text_command
+      data:
+        command: "turn off Pool Light"
+  mode: single
+  icon: mdi:lightbulb

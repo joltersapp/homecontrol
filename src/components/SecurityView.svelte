@@ -43,15 +43,19 @@
   let connectionStatus = 'disconnected';
   
   // Generate stream URLs from go2rtc
+  // Use window.location.hostname to work in both dev and production
+  const go2rtcHost = window.location.hostname;
+
   $: {
     console.log('[Camera URLs Debug] Setting up go2rtc streams');
     cameras.forEach(camera => {
-      // Use go2rtc HLS endpoint (runs on port 8888)
-      const url = `http://localhost:8888/stream.m3u8?src=${camera.streamName}`;
+      // Use go2rtc MSE/MP4 endpoint for better browser compatibility
+      const url = `http://${go2rtcHost}:1984/api/stream.mp4?src=${camera.streamName}`;
       console.log(`[Camera Debug] go2rtc URL for ${camera.name}:`, {
         cameraId: camera.id,
         streamName: camera.streamName,
-        url: url
+        url: url,
+        host: go2rtcHost
       });
       cameraUrls[camera.id] = url;
     });
@@ -102,19 +106,19 @@
   
   function initializeStreams() {
     console.log('[Streams] Initializing direct MSE streams');
-    
+
     cameras.forEach(camera => {
       const videoElement = document.getElementById(`video-${camera.id}`);
-      
+
       if (videoElement) {
         // Use MSE endpoint directly from go2rtc
-        const streamUrl = `http://localhost:1984/api/stream.mp4?src=${camera.streamName}`;
-        
+        const streamUrl = `http://${go2rtcHost}:1984/api/stream.mp4?src=${camera.streamName}`;
+
         console.log(`[Streams] Setting stream URL for ${camera.name}: ${streamUrl}`);
-        
+
         // Set the source
         videoElement.src = streamUrl;
-        
+
         // Ensure video plays
         videoElement.play().catch(err => {
           console.warn(`[Streams] Auto-play blocked for ${camera.name}, user interaction may be required:`, err);
@@ -125,20 +129,21 @@
   
   onMount(() => {
     console.log('[Camera Debug] Component mounted with MSE streaming');
-    
+    console.log('[Camera Debug] go2rtc host:', go2rtcHost);
+
     // Set camera URLs for initial display
     cameras.forEach(camera => {
-      cameraUrls[camera.id] = `http://localhost:1984/api/stream.mp4?src=${camera.streamName}`;
+      cameraUrls[camera.id] = `http://${go2rtcHost}:1984/api/stream.mp4?src=${camera.streamName}`;
     });
     cameraUrls = {...cameraUrls};
-    
+
     // Initialize streams after DOM is ready
     setTimeout(initializeStreams, 100);
-    
+
     // Connect to motion events
     connectToMotionEvents();
-    
-    // No need for refresh interval with HLS streams
+
+    // No need for refresh interval with MSE streams
     // The video elements handle streaming automatically
   });
   

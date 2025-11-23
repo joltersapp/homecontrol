@@ -12,7 +12,7 @@ function createHAStore() {
   let messageHandlers = {};
 
   const connect = () => {
-      const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI4ZGI0OGY3NGZhMzQ0ZTAyODZkMTNmZjEwYWFmZTFlOSIsImlhdCI6MTc1NTQ4MjI5MiwiZXhwIjoyMDcwODQyMjkyfQ.nDPugy3mk6SUHa0EnkQXQCFXv3sNFdPmPqrx9NA5t1c';
+      const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJkMTY4YjhmZDU1YTY0YzhkYmJhNDY3ODZkNTM1MWU5MyIsImlhdCI6MTc2MzU5MTMwMCwiZXhwIjoyMDc4OTUxMzAwfQ.Vyz4iRVr93i-LXo_6sg-nENo-TgTmrxPa1vhXDjWVLs';
       // Store token in localStorage for camera access
       localStorage.setItem('ha_token', token);
       console.log('[HAStore Debug] Token stored in localStorage:', token.substring(0, 20) + '...');
@@ -48,13 +48,21 @@ function createHAStore() {
             id: messageId++,
             type: 'get_states'
           }));
-        } else if (message.type === 'result' && message.result) {
+        } else if (message.type === 'result' && message.result && Array.isArray(message.result)) {
           // Initial states
           const entities = {};
           message.result.forEach(state => {
             entities[state.entity_id] = state;
           });
           update(state => ({ ...state, entities }));
+        } else if (message.type === 'result' && message.result) {
+          // Service call result - just log it
+          console.log('Service call result:', message);
+          // Check if there's a handler for this message ID
+          if (messageHandlers[message.id]) {
+            messageHandlers[message.id](message.result);
+            delete messageHandlers[message.id];
+          }
         } else if (message.type === 'event' && message.event.event_type === 'state_changed') {
           // State update
           const data = message.event.data;

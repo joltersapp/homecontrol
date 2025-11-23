@@ -6,6 +6,8 @@
   import RoomControl from './components/RoomControl.svelte';
   import AudioControl from './components/AudioControl.svelte';
   import SecurityView from './components/SecurityView.svelte';
+  import MasterLights from './components/MasterLights.svelte';
+  import PoolControl from './components/PoolControl.svelte';
   import { haStore } from './stores/haStore.js';
   import { version, buildTime, buildNumber } from './version.js';
   
@@ -66,30 +68,64 @@
       media: 'media_player.living_room_sonos',
       climate: 'climate.walkway'
     },
-    { 
-      id: 'kitchen', 
+    {
+      id: 'kitchen',
       name: 'Kitchen',
-      lights: ['light.kitchen_light', 'light.left_kitchen_light', 'light.right_kitchen_lights', 'switch.kichten_cabinet_light'],
+      lights: ['light.kitchen_light', 'light.left_kitchen_light', 'light.right_kitchen_lights', 'light.kichten_cabinet_light', 'switch.kichten_cabinet_light'],
       media: 'media_player.kitchen'
     },
-    { 
-      id: 'bedroom', 
+    {
+      id: 'bedroom',
       name: 'Master Bedroom',
       lights: [],
       media: 'media_player.master_bedroom_sonos'
     },
-    { 
-      id: 'office', 
+    {
+      id: 'guest_bedroom',
+      name: 'Guest Bedroom',
+      lights: ['light.guest_bedroom_fan_light_2']
+    },
+    {
+      id: 'hallway',
+      name: 'Hallway',
+      lights: ['light.hallway_light', 'switch.gold_light']
+    },
+    {
+      id: 'office',
       name: 'Office',
-      lights: ['switch.office_lamp'],
+      lights: ['light.office_light', 'switch.office_lamp'],
       fan: 'fan.office_fan'
     },
-    { 
-      id: 'patio', 
+    {
+      id: 'patio',
       name: 'Patio',
       lights: ['light.hover_flush', 'light.hover_patio_left'],
-      fan: 'fan.hover_flush',
+      lightGroups: [
+        {
+          name: 'Patio Ceiling Lights',
+          entities: [
+            'light.patio_light_left_1',
+            'light.patio_light_left_2',
+            'light.patio_light_left_3',
+            'light.patio_light_right_1',
+            'light.patio_light_right_2',
+            'light.patio_light_right_3'
+          ]
+        }
+      ],
+      fans: ['fan.hover_flush', 'fan.hover_patio_left'],
       media: 'media_player.terrace'
+    },
+    {
+      id: 'outside',
+      name: 'Outside Lights',
+      lights: ['switch.front_door_light', 'switch.outside_lights'],
+      lightGroups: [
+        {
+          name: 'All Lights',
+          entities: ['switch.front_door_light', 'switch.outside_lights']
+        }
+      ]
     }
   ];
 </script>
@@ -119,19 +155,25 @@
         <div class="flex items-center gap-6">
           <!-- Navigation -->
           <nav class="flex gap-2">
-            <button 
+            <button
               class="nav-button {currentView === 'home' ? 'active' : ''}"
               on:click={() => currentView = 'home'}
             >
               Rooms
             </button>
-            <button 
+            <button
+              class="nav-button {currentView === 'lights' ? 'active' : ''}"
+              on:click={() => currentView = 'lights'}
+            >
+              Lights
+            </button>
+            <button
               class="nav-button {currentView === 'audio' ? 'active' : ''}"
               on:click={() => currentView = 'audio'}
             >
               Audio
             </button>
-            <button 
+            <button
               class="nav-button {currentView === 'security' ? 'active' : ''}"
               on:click={() => {
                 console.log('[App Debug] Switching to security view');
@@ -140,6 +182,12 @@
               }}
             >
               Security
+            </button>
+            <button
+              class="nav-button {currentView === 'pool' ? 'active' : ''}"
+              on:click={() => currentView = 'pool'}
+            >
+              Pool
             </button>
           </nav>
           <div class="flex items-center gap-3">
@@ -154,7 +202,7 @@
 
     {#if currentView === 'home'}
     <!-- Room Selector -->
-    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-8">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
       {#each rooms as room, i}
         <button
           on:click={() => activeRoom = activeRoom === room.id ? null : room.id}
@@ -193,6 +241,11 @@
         />
       </div>
     {/if}
+    {:else if currentView === 'lights'}
+      <!-- Master Lights Page -->
+      <div in:fly={{ x: 50, duration: 400, easing: cubicOut }}>
+        <MasterLights {entities} {rooms} />
+      </div>
     {:else if currentView === 'audio'}
       <!-- Audio Controls Page -->
       <div in:fly={{ x: 50, duration: 400, easing: cubicOut }}>
@@ -202,6 +255,11 @@
       <!-- Security View Page -->
       <div in:fly={{ x: 50, duration: 400, easing: cubicOut }}>
         <SecurityView {entities} />
+      </div>
+    {:else if currentView === 'pool'}
+      <!-- Pool Control Page -->
+      <div in:fly={{ x: 50, duration: 400, easing: cubicOut }}>
+        <PoolControl {entities} />
       </div>
     {/if}
 

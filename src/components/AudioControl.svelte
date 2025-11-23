@@ -78,13 +78,153 @@
     const isPlaying = entities[playerId].state === 'playing';
     haStore.callService('media_player', isPlaying ? 'media_pause' : 'media_play', playerId);
   }
+
+  // Sonos grouping functionality
+  let selectedSpeakers = [];
+
+  function getAllAvailableSpeakers() {
+    return sonosDevices.filter(device => {
+      const entity = entities[device.player];
+      if (!entity) return false;
+
+      // Show all speakers that aren't already in a group
+      // OR speakers that are the master of their own group
+      const grouped = isInGroup(device.player);
+      if (!grouped) return true;
+
+      const groupMembers = getGroupedSpeakers(device.player);
+      return groupMembers[0] === device.player; // Only show if this is the master
+    });
+  }
+
+  function getGroupedSpeakers(playerId) {
+    const entity = entities[playerId];
+    return entity?.attributes?.group_members || [];
+  }
+
+  function isInGroup(playerId) {
+    const groupMembers = getGroupedSpeakers(playerId);
+    return groupMembers.length > 1;
+  }
+
+  function joinSpeakers() {
+    if (selectedSpeakers.length < 2) return;
+
+    // First speaker becomes the master
+    const master = selectedSpeakers[0];
+    const members = selectedSpeakers.slice(1);
+
+    haStore.callService('media_player', 'join', master, {
+      group_members: members
+    });
+
+    // Clear selection
+    selectedSpeakers = [];
+  }
+
+  function unjoinSpeaker(playerId) {
+    haStore.callService('media_player', 'unjoin', playerId);
+  }
+
+  function ungroupAll(masterPlayerId) {
+    // Get all group members
+    const groupMembers = getGroupedSpeakers(masterPlayerId);
+
+    // Unjoin each member except the master
+    groupMembers.forEach(memberId => {
+      if (memberId !== masterPlayerId) {
+        haStore.callService('media_player', 'unjoin', memberId);
+      }
+    });
+  }
+
+  function toggleSpeakerSelection(playerId) {
+    if (selectedSpeakers.includes(playerId)) {
+      selectedSpeakers = selectedSpeakers.filter(id => id !== playerId);
+    } else {
+      selectedSpeakers = [...selectedSpeakers, playerId];
+    }
+  }
 </script>
 
 <div class="audio-control">
   <h2 class="text-2xl font-light mb-8 text-gray-300 uppercase tracking-wider text-center">
     Whole Home Audio Control
   </h2>
-  
+
+  <!-- Sonos Grouping Section -->
+  {#if getAllAvailableSpeakers().length > 1}
+    {@const availableSpeakers = getAllAvailableSpeakers()}
+    <div class="grouping-section glass mb-8">
+      <h3 class="text-lg font-light text-gray-300 mb-4">Group Speakers</h3>
+      <p class="text-xs text-gray-500 mb-4">Select 2 or more speakers to group them together. First selected becomes master.</p>
+
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        {#each availableSpeakers as device}
+          {@const playerState = entities[device.player]?.state || 'unknown'}
+          <button
+            class="speaker-select {selectedSpeakers.includes(device.player) ? 'selected' : ''} {playerState === 'playing' ? 'playing' : ''}"
+            on:click={() => toggleSpeakerSelection(device.player)}
+          >
+            <span class="speaker-check {selectedSpeakers.includes(device.player) ? 'checked' : ''}">
+              {#if selectedSpeakers.includes(device.player)}✓{/if}
+            </span>
+            <span class="speaker-name">{device.name}</span>
+            <span class="speaker-state">{playerState.toUpperCase()}</span>
+          </button>
+        {/each}
+      </div>
+
+      {#if selectedSpeakers.length >= 2}
+        <button class="join-button" on:click={joinSpeakers}>
+          Join {selectedSpeakers.length} Speakers
+        </button>
+      {:else}
+        <button class="join-button disabled" disabled>
+          Select at least 2 speakers to join
+        </button>
+      {/if}
+    </div>
+  {/if}
+
+  <!-- Active Groups Section -->
+  {#each sonosDevices as device}
+    {#if entities[device.player] && isInGroup(device.player)}
+      {@const groupMembers = getGroupedSpeakers(device.player)}
+      {#if groupMembers[0] === device.player}
+        <div class="group-section glass mb-6">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-lg font-light text-gray-300">{device.name} Group</h3>
+              <p class="text-xs text-gray-500 mt-1">
+                {groupMembers.length} speaker{groupMembers.length > 1 ? 's' : ''} grouped
+              </p>
+            </div>
+            <button class="unjoin-button" on:click={() => ungroupAll(device.player)}>
+              Ungroup All
+            </button>
+          </div>
+          <div class="flex flex-wrap gap-2 mt-3">
+            {#each groupMembers as memberId}
+              {@const memberDevice = sonosDevices.find(d => d.player === memberId)}
+              {@const isMaster = memberId === device.player}
+              {#if memberDevice}
+                <div class="group-member {isMaster ? 'master' : ''}">
+                  <span class="member-name">{memberDevice.name}</span>
+                  {#if isMaster}
+                    <span class="master-badge">MASTER</span>
+                  {:else}
+                    <button class="remove-member" on:click={() => unjoinSpeaker(memberId)}>×</button>
+                  {/if}
+                </div>
+              {/if}
+            {/each}
+          </div>
+        </div>
+      {/if}
+    {/if}
+  {/each}
+
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
     {#each sonosDevices as device}
       <div class="device-card">
@@ -621,5 +761,190 @@
   
   .action-button:active {
     transform: scale(0.98);
+  }
+
+  /* Sonos Grouping Styles */
+  .glass {
+    background: rgba(255, 255, 255, 0.02);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 20px;
+    padding: 1.5rem;
+  }
+
+  .grouping-section {
+    text-align: center;
+  }
+
+  .speaker-select {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 300ms ease;
+  }
+
+  .speaker-select:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(0, 212, 255, 0.3);
+  }
+
+  .speaker-select.selected {
+    background: rgba(0, 212, 255, 0.15);
+    border-color: rgba(0, 212, 255, 0.5);
+  }
+
+  .speaker-select.playing {
+    border-color: rgba(0, 255, 136, 0.3);
+  }
+
+  .speaker-select.playing.selected {
+    border-color: rgba(0, 212, 255, 0.5);
+  }
+
+  .speaker-check {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    color: #00d4ff;
+    font-weight: bold;
+    transition: all 200ms ease;
+  }
+
+  .speaker-check.checked {
+    background: rgba(0, 212, 255, 0.3);
+    border-color: #00d4ff;
+  }
+
+  .speaker-name {
+    font-size: 0.875rem;
+    color: rgba(255, 255, 255, 0.8);
+    font-weight: 300;
+  }
+
+  .speaker-state {
+    font-size: 0.625rem;
+    color: rgba(255, 255, 255, 0.4);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .speaker-select.playing .speaker-state {
+    color: rgba(0, 255, 136, 0.8);
+  }
+
+  .join-button {
+    padding: 1rem 2rem;
+    background: rgba(0, 212, 255, 0.15);
+    border: 2px solid rgba(0, 212, 255, 0.3);
+    border-radius: 12px;
+    color: #00d4ff;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    transition: all 300ms ease;
+    cursor: pointer;
+    text-transform: uppercase;
+    width: 100%;
+    max-width: 400px;
+  }
+
+  .join-button:hover:not(.disabled) {
+    background: rgba(0, 212, 255, 0.25);
+    border-color: rgba(0, 212, 255, 0.5);
+    transform: translateY(-2px);
+    box-shadow: 0 10px 30px rgba(0, 212, 255, 0.3);
+  }
+
+  .join-button.disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  .group-section {
+    padding: 1.5rem;
+  }
+
+  .unjoin-button {
+    padding: 0.5rem 1.25rem;
+    background: rgba(255, 100, 100, 0.1);
+    border: 1px solid rgba(255, 100, 100, 0.3);
+    border-radius: 8px;
+    color: rgba(255, 100, 100, 0.9);
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    transition: all 300ms ease;
+    cursor: pointer;
+    text-transform: uppercase;
+  }
+
+  .unjoin-button:hover {
+    background: rgba(255, 100, 100, 0.2);
+    border-color: rgba(255, 100, 100, 0.5);
+  }
+
+  .group-member {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: rgba(0, 212, 255, 0.1);
+    border: 1px solid rgba(0, 212, 255, 0.2);
+    border-radius: 8px;
+    color: rgba(0, 212, 255, 0.9);
+    font-size: 0.875rem;
+  }
+
+  .group-member.master {
+    background: rgba(0, 255, 136, 0.1);
+    border-color: rgba(0, 255, 136, 0.3);
+    color: rgba(0, 255, 136, 0.9);
+  }
+
+  .member-name {
+    flex: 1;
+  }
+
+  .master-badge {
+    font-size: 0.625rem;
+    padding: 0.125rem 0.5rem;
+    background: rgba(0, 255, 136, 0.2);
+    border: 1px solid rgba(0, 255, 136, 0.3);
+    border-radius: 4px;
+    color: rgba(0, 255, 136, 1);
+    font-weight: 500;
+    letter-spacing: 0.05em;
+  }
+
+  .remove-member {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 100, 100, 0.2);
+    border: 1px solid rgba(255, 100, 100, 0.3);
+    border-radius: 4px;
+    color: rgba(255, 100, 100, 0.9);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: all 200ms ease;
+  }
+
+  .remove-member:hover {
+    background: rgba(255, 100, 100, 0.3);
+    border-color: rgba(255, 100, 100, 0.5);
+    transform: scale(1.1);
   }
 </style>
