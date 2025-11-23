@@ -1,5 +1,6 @@
 <script>
   import { haStore } from '../stores/haStore';
+  import { api } from '../lib/api';
   import { onMount, onDestroy } from 'svelte';
 
   export let entities;
@@ -30,53 +31,69 @@
   let currentPumpJob = null;
   let currentSprinklerJob = null;
 
-  function startJobTracking(device, session = null) {
-    const job = {
-      id: Date.now(),
-      device,
-      session,
-      startTime: new Date(),
-      endTime: null,
-      duration: null,
-      conditions: {}
-    };
+  async function startJobTracking(device, session = null) {
+    const conditions = {};
 
-    if (device === 'Pool Pump') {
-      currentPumpJob = job;
-      if (session) {
-        job.conditions.temperature = entities?.['sensor.nws_temperature']?.state;
-        job.conditions.reason = pumpSchedule.reason;
-      }
+    if (device === 'Pool Pump' && session) {
+      conditions.temperature = entities?.['sensor.nws_temperature']?.state;
+      conditions.reason = pumpSchedule.reason;
     } else if (device === 'Sprinkler') {
-      currentSprinklerJob = job;
-      job.conditions.aiDecision = entities?.['input_text.sprinkler_ai_decision']?.state;
-      job.conditions.shouldWater = entities?.['input_boolean.sprinkler_should_water_today']?.state === 'on';
-      job.conditions.duration = entities?.['input_number.sprinkler_duration']?.state;
+      conditions.aiDecision = entities?.['input_text.sprinkler_ai_decision']?.state;
+      conditions.shouldWater = entities?.['input_boolean.sprinkler_should_water_today']?.state === 'on';
+      conditions.duration = entities?.['input_number.sprinkler_duration']?.state;
     }
 
-    return job;
+    try {
+      const result = await api.createJob(device, session, conditions);
+
+      if (device === 'Pool Pump') {
+        currentPumpJob = result.jobId;
+      } else if (device === 'Sprinkler') {
+        currentSprinklerJob = result.jobId;
+      }
+
+      return result.jobId;
+    } catch (error) {
+      console.error('Failed to start job tracking:', error);
+      return null;
+    }
   }
 
-  function endJobTracking(device) {
-    const job = device === 'Pool Pump' ? currentPumpJob : currentSprinklerJob;
-    if (!job) return;
+  async function endJobTracking(device) {
+    const jobId = device === 'Pool Pump' ? currentPumpJob : currentSprinklerJob;
+    if (!jobId) return;
 
-    job.endTime = new Date();
-    job.duration = Math.round((job.endTime - job.startTime) / 1000 / 60); // minutes
+    try {
+      await api.endJob(jobId);
+      await loadJobHistory(device);
 
-    if (device === 'Pool Pump') {
-      pumpJobHistory = [job, ...pumpJobHistory].slice(0, 20);
-      localStorage.setItem('pool_pump_jobs', JSON.stringify(pumpJobHistory));
-      currentPumpJob = null;
-    } else if (device === 'Sprinkler') {
-      sprinklerJobHistory = [job, ...sprinklerJobHistory].slice(0, 20);
-      localStorage.setItem('sprinkler_jobs', JSON.stringify(sprinklerJobHistory));
-      currentSprinklerJob = null;
+      if (device === 'Pool Pump') {
+        currentPumpJob = null;
+      } else if (device === 'Sprinkler') {
+        currentSprinklerJob = null;
+      }
+    } catch (error) {
+      console.error('Failed to end job tracking:', error);
+    }
+  }
+
+  async function loadJobHistory(device) {
+    try {
+      const result = await api.getJobs(device, 20);
+      if (device === 'Pool Pump') {
+        pumpJobHistory = result.jobs;
+      } else if (device === 'Sprinkler') {
+        sprinklerJobHistory = result.jobs;
+      }
+    } catch (error) {
+      console.error('Failed to load job history:', error);
     }
   }
 
   function formatJobTime(date) {
-    return new Date(date).toLocaleString('en-US', {
+    // Handle both Date objects and ISO strings
+    const dateObj = typeof date === 'string' ? new Date(date) : date;
+    return dateObj.toLocaleString('en-US', {
       month: 'short',
       day: 'numeric',
       hour: 'numeric',
@@ -92,27 +109,12 @@
     return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
   }
 
-  // Load saved states from localStorage
+  // Load initial state from localStorage (for device states only)
   if (typeof localStorage !== 'undefined') {
     sprinklerState = localStorage.getItem('pool_sprinkler_state') === 'true';
     poolPumpState = localStorage.getItem('pool_pump_state') === 'true';
     poolLightState = localStorage.getItem('pool_light_state') === 'true';
     pumpScheduleEnabled = localStorage.getItem('pool_pump_schedule_enabled') === 'true';
-
-    const savedSchedule = localStorage.getItem('pool_pump_schedule');
-    if (savedSchedule) {
-      pumpSchedule = JSON.parse(savedSchedule);
-    }
-
-    const savedPumpJobs = localStorage.getItem('pool_pump_jobs');
-    if (savedPumpJobs) {
-      pumpJobHistory = JSON.parse(savedPumpJobs);
-    }
-
-    const savedSprinklerJobs = localStorage.getItem('sprinkler_jobs');
-    if (savedSprinklerJobs) {
-      sprinklerJobHistory = JSON.parse(savedSprinklerJobs);
-    }
   }
 
   function toggleSprinkler() {
@@ -140,7 +142,7 @@
   }
 
   // Calculate pool pump schedule based on temperature and season
-  function calculateSchedule() {
+  async function calculateSchedule() {
     const temp = entities?.['sensor.nws_temperature']?.state ? parseFloat(entities['sensor.nws_temperature'].state) : 80;
     const month = new Date().getMonth() + 1; // 1-12
     const isSummer = month >= 5 && month <= 10;
@@ -187,7 +189,12 @@
       eveningStart: '21:00'
     };
 
-    localStorage.setItem('pool_pump_schedule', JSON.stringify(pumpSchedule));
+    try {
+      await api.saveSchedule('Pool Pump', pumpSchedule);
+    } catch (error) {
+      console.error('Failed to save schedule:', error);
+    }
+
     updateNextAction();
   }
 
@@ -335,7 +342,21 @@
   }
 
   // Run daily schedule calculation at 5 AM
-  onMount(() => {
+  onMount(async () => {
+    // Load schedule and job history from API
+    try {
+      const scheduleResult = await api.getSchedule('Pool Pump');
+      if (scheduleResult.schedule) {
+        pumpSchedule = scheduleResult.schedule.config;
+      }
+    } catch (error) {
+      console.error('Failed to load schedule:', error);
+    }
+
+    // Load job histories
+    await loadJobHistory('Pool Pump');
+    await loadJobHistory('Sprinkler');
+
     // Check every minute if it's 5 AM
     scheduleCheckInterval = setInterval(() => {
       const now = new Date();
@@ -448,10 +469,10 @@
                       <span class="job-label">{job.session || 'Manual'}</span>
                     </div>
                     <div class="job-time">
-                      <span class="job-date">{formatJobTime(job.startTime)}</span>
+                      <span class="job-date">{formatJobTime(job.start_time)}</span>
                       <span class="job-duration">{formatDuration(job.duration)}</span>
                     </div>
-                    {#if job.conditions.temperature}
+                    {#if job.conditions?.temperature}
                       <div class="job-conditions">
                         <span class="job-temp">{job.conditions.temperature}°F</span>
                       </div>
@@ -592,10 +613,10 @@
               {#each sprinklerJobHistory.slice(0, 5) as job}
                 <div class="job-row">
                   <div class="job-time">
-                    <span class="job-date">{formatJobTime(job.startTime)}</span>
+                    <span class="job-date">{formatJobTime(job.start_time)}</span>
                     <span class="job-duration">{formatDuration(job.duration)} per zone</span>
                   </div>
-                  {#if job.conditions.aiDecision}
+                  {#if job.conditions?.aiDecision}
                     <div class="job-ai-reason">
                       <span class="job-reason-text">{job.conditions.aiDecision}</span>
                     </div>

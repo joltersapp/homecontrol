@@ -40,3 +40,6 @@ lerna-debug.log*
 ha_token.txt
 config.js
 config.json
+
+# SQLite database
+data/
