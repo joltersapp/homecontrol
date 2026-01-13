@@ -7,14 +7,18 @@
   function formatJobTime(job) {
     // Handle AI decisions with just a date field (YYYY-MM-DD)
     const timestamp = job.date || job.start_time;
-    // For date-only strings (YYYY-MM-DD), append time to force local timezone interpretation
+    // For date-only strings (YYYY-MM-DD), append midnight to force local timezone interpretation
     // This avoids UTC midnight issues that cause incorrect "Today" labels
     const dateStr = (job.date && !timestamp.includes('T'))
-      ? timestamp + 'T12:00:00'  // Noon local time to avoid edge cases
+      ? timestamp + 'T00:00:00'  // Midnight local time
       : timestamp;
     const date = new Date(dateStr);
     const now = new Date();
-    const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
+
+    // Calculate day difference using calendar dates, not absolute time
+    const dateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const nowOnly = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const diffDays = Math.floor((nowOnly - dateOnly) / (1000 * 60 * 60 * 24));
 
     // For AI decisions (date only), don't show time
     if (job.date && jobType === 'sprinkler-ai') {
