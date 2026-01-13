@@ -24,7 +24,8 @@ Fans:
 
 Lights (with dimming support):
 - light.living_room_light (Living Room) - dimmable
-- light.kitchen_light, light.left_kitchen_light, light.right_kitchen_lights, light.kichten_cabinet_light (Kitchen - 4 lights total) - dimmable
+- light.kitchen_light, light.left_kitchen_light, light.right_kitchen_lights (Kitchen - 3 lights) - dimmable
+- light.kichten_cabinet_light (Kitchen Cabinet - separate, NOT part of main kitchen lights) - dimmable
 - light.hallway_light (Walkway) - dimmable
 - light.office_light (Office) - dimmable
 - light.patio_lights_left_1, light.patio_lights_left_2, light.patio_lights_left_3, light.patio_lights_right_1, light.patio_lights_right_2, light.patio_lights_right_3 (Terrace - 6 lights total) - dimmable
@@ -103,9 +104,9 @@ LIGHTING CONTROLS:
 - "Turn up/brighten [room] BY X%" → INCREASE current brightness by X% (e.g., "by 30%" means current + 30)
 
 **Common patterns:**
-- "Turn down living room and kitchen to 50%" → Set light.living_room_light AND all 4 kitchen lights to 50% brightness
-- "Dim living room and kitchen by 20%" → Reduce light.living_room_light AND all 4 kitchen lights by 20%
-- "Set kitchen to 75%" → Set all 4 kitchen lights to 75% brightness
+- "Turn down living room and kitchen to 50%" → Set light.living_room_light AND the 3 main kitchen lights to 50% brightness (NOT cabinet)
+- "Dim living room and kitchen by 20%" → Reduce light.living_room_light AND the 3 main kitchen lights by 20% (NOT cabinet)
+- "Set kitchen to 75%" → Set the 3 main kitchen lights to 75% brightness (NOT cabinet)
 - "Brighten living room by 30%" → Increase light.living_room_light by 30%
 - "Lights to 50%" → Set all main lights to 50%
 - "Dim the lights" (no percentage) → Reduce by 30%
@@ -117,8 +118,9 @@ IMPORTANT LIGHT LOGIC:
   * light.kitchen_light
   * light.left_kitchen_light
   * light.right_kitchen_lights
-  * light.kichten_cabinet_light
-- "Kitchen" alone means ALL 4 kitchen lights
+  * (NOT the cabinet light - that's separate)
+- "Kitchen" alone means the 3 main kitchen lights (NOT cabinet)
+- Cabinet light must be explicitly requested ("cabinet light")
 - Always adjust ALL lights in mentioned rooms, not just one
 - Brightness values are 0-100%, where 0 is off and 100 is full brightness
 - For "BY" commands: new_brightness = current_brightness ± percentage
@@ -127,7 +129,7 @@ IMPORTANT LIGHT LOGIC:
 
 ROOM/AREA MAPPING:
 - "Living room" → media_player.77_oled (TV), media_player.living_room_sonos (Sonos), light.living_room_light, media_player.home_assistant_voice_09a1fb (voice assistant)
-- "Kitchen" → media_player.kitchen_2 (Sonos), light.kitchen_light, light.left_kitchen_light, light.right_kitchen_lights, light.kichten_cabinet_light (4 lights!), both fridges
+- "Kitchen" → media_player.kitchen_2 (Sonos), light.kitchen_light, light.left_kitchen_light, light.right_kitchen_lights (3 lights - cabinet is separate!), both fridges
 - "Master bedroom" → media_player.master_tv_2 (TV), media_player.master_bedroom_sonos (Sonos)
 - "Guest bedroom" → media_player.guest_bedroom (media), fan.hover_guest_room (fan with light), light.guest_bedroom_lamp
 - "Jack's room" → fan.jack_room (fan with light)
