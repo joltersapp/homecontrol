@@ -3,6 +3,23 @@ import { weatherService } from './weatherService.js';
 import { geminiService } from './geminiService.js';
 import { sprinklerControl } from './sprinklerControl.js';
 
+/**
+ * Get current date in America/New_York timezone as YYYY-MM-DD
+ * @returns {string} Date string in YYYY-MM-DD format (Miami/EST timezone)
+ */
+function getLocalDate() {
+  const dateStr = new Date().toLocaleString('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  // Converts "MM/DD/YYYY, HH:MM:SS" to "YYYY-MM-DD"
+  const [datePart] = dateStr.split(',');
+  const [month, day, year] = datePart.split('/');
+  return `${year}-${month}-${day}`;
+}
+
 class SchedulerService {
   constructor() {
     this.isRunning = false;
@@ -119,7 +136,7 @@ class SchedulerService {
   async calculateDailySprinklerDuration() {
     try {
       const device = 'Sprinkler';
-      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+      const today = getLocalDate(); // YYYY-MM-DD in America/New_York timezone
 
       console.log(`[Scheduler] Calculating sprinkler duration for ${today}`);
 
@@ -162,7 +179,7 @@ class SchedulerService {
       console.error('[Scheduler] Error calculating sprinkler duration:', error);
 
       // Store fallback decision
-      const today = new Date().toISOString().split('T')[0];
+      const today = getLocalDate();
       const stmt = db.prepare(`
         INSERT OR REPLACE INTO ai_decisions
         (device, date, duration, temperature, humidity, forecast, reasoning, should_water)

@@ -1,5 +1,22 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+/**
+ * Get current date in America/New_York timezone as YYYY-MM-DD
+ * @returns {string} Date string in YYYY-MM-DD format (Miami/EST timezone)
+ */
+function getLocalDate() {
+  const dateStr = new Date().toLocaleString('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  // Converts "MM/DD/YYYY, HH:MM:SS" to "YYYY-MM-DD"
+  const [datePart] = dateStr.split(',');
+  const [month, day, year] = datePart.split('/');
+  return `${year}-${month}-${day}`;
+}
+
 class GeminiService {
   constructor() {
     this.apiKey = process.env.GEMINI_API_KEY;
@@ -112,7 +129,7 @@ Respond in JSON format:
       };
     }
 
-    const targetDate = date || new Date().toISOString().split('T')[0];
+    const targetDate = date || getLocalDate();
 
     try {
       const model = this.genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });

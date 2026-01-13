@@ -1,6 +1,23 @@
 import fetch from 'node-fetch';
 import db from '../db.js';
 
+/**
+ * Get current date in America/New_York timezone as YYYY-MM-DD
+ * @returns {string} Date string in YYYY-MM-DD format (Miami/EST timezone)
+ */
+function getLocalDate() {
+  const dateStr = new Date().toLocaleString('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  // Converts "MM/DD/YYYY, HH:MM:SS" to "YYYY-MM-DD"
+  const [datePart] = dateStr.split(',');
+  const [month, day, year] = datePart.split('/');
+  return `${year}-${month}-${day}`;
+}
+
 class SprinklerControl {
   constructor() {
     this.haUrl = process.env.HA_URL || 'http://192.168.1.222:8123';
@@ -65,7 +82,7 @@ class SprinklerControl {
    * @returns {Promise<{shouldWater: boolean, duration: number, reasoning: string}>}
    */
   async getLatestDecision() {
-    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const today = getLocalDate(); // YYYY-MM-DD in America/New_York timezone
 
     const decision = db.prepare(`
       SELECT duration, should_water, reasoning

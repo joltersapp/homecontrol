@@ -7,7 +7,12 @@
   function formatJobTime(job) {
     // Handle AI decisions with just a date field (YYYY-MM-DD)
     const timestamp = job.date || job.start_time;
-    const date = new Date(timestamp);
+    // For date-only strings (YYYY-MM-DD), append time to force local timezone interpretation
+    // This avoids UTC midnight issues that cause incorrect "Today" labels
+    const dateStr = (job.date && !timestamp.includes('T'))
+      ? timestamp + 'T12:00:00'  // Noon local time to avoid edge cases
+      : timestamp;
+    const date = new Date(dateStr);
     const now = new Date();
     const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
 
