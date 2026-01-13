@@ -1,6 +1,6 @@
 const API_BASE = import.meta.env.PROD
   ? '/api'  // Production: same origin
-  : 'http://localhost:3001/api';  // Development: API server
+  : `http://${window.location.hostname}:3001/api`;  // Development: API server
 
 class APIClient {
   async request(endpoint, options = {}) {
@@ -60,6 +60,54 @@ class APIClient {
       method: 'POST',
       body: JSON.stringify({ config }),
     });
+  }
+
+  // Sprinkler AI endpoints
+  async getSprinklerDuration() {
+    return this.request('/sprinkler/duration');
+  }
+
+  async getSprinklerHistory(limit = 30) {
+    return this.request(`/sprinkler/history?limit=${limit}`);
+  }
+
+  async calculateSprinklerDuration() {
+    return this.request('/sprinkler/calculate', {
+      method: 'POST',
+    });
+  }
+
+  // Temperature automation endpoints
+  async getTemperatureStatus() {
+    return this.request('/temperature/status');
+  }
+
+  async toggleTemperatureAutomation() {
+    return this.request('/temperature/toggle', {
+      method: 'POST',
+    });
+  }
+
+  async setTargetTemperature(temperature) {
+    return this.request('/temperature/set-target', {
+      method: 'POST',
+      body: JSON.stringify({ temperature }),
+    });
+  }
+
+  async getTemperatureHistory(limit = 50) {
+    return this.request(`/jobs/Office Temperature?limit=${limit}`);
+  }
+
+  async submitTemperatureFeedback(feedbackType) {
+    return this.request('/temperature/feedback', {
+      method: 'POST',
+      body: JSON.stringify({ feedbackType }),
+    });
+  }
+
+  async getTemperatureAnalytics() {
+    return this.request('/temperature/analytics');
   }
 }
 

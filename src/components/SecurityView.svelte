@@ -1,13 +1,14 @@
 <script>
   import { haStore } from '../stores/haStore';
   import { onMount, onDestroy } from 'svelte';
-  
+  import Hls from 'hls.js';
+
   export let entities;
-  
+
   // Immediate debug log
   console.log('[SecurityView Debug] Component initialized');
   console.log('[SecurityView Debug] Entities prop received:', entities ? Object.keys(entities).length : 'undefined');
-  
+
   // UniFi Protect cameras with go2rtc streams
   const cameras = [
     {
@@ -32,66 +33,122 @@
       streamName: 'east_camera'
     }
   ];
-  
+
   // Note: Package camera also available but focusing on main 3
   // camera.front_door_package_camera
-  
+
   let selectedCamera = null;
   let cameraUrls = {};
+  let videoElements = {};
+  let videoStates = {};
+  let hlsInstances = {}; // Store HLS.js instances for cleanup
   let motionEvents = [];
   let wsConnection = null;
   let connectionStatus = 'disconnected';
-  
-  // Generate stream URLs from go2rtc
-  // Use window.location.hostname to work in both dev and production
+
+  // Detect Safari/iOS for native HLS support
+  function isSafari() {
+    const ua = navigator.userAgent.toLowerCase();
+    const isSafariDesktop = ua.indexOf('safari') > -1 && ua.indexOf('chrome') === -1 && ua.indexOf('chromium') === -1;
+    const isIOS = /ipad|iphone|ipod/.test(ua);
+    return isSafariDesktop || isIOS;
+  }
+
+  // go2rtc HLS streaming - native video elements for iOS PWA compatibility
+  // Use dynamic hostname so it works both locally and remotely
   const go2rtcHost = window.location.hostname;
+  const go2rtcPort = 1984; // go2rtc API port (HLS served through API)
 
   $: {
-    console.log('[Camera URLs Debug] Setting up go2rtc streams');
+    console.log('[Camera URLs Debug] Setting up go2rtc MP4 streams');
     cameras.forEach(camera => {
-      // Use go2rtc MSE/MP4 endpoint for better browser compatibility
-      const url = `http://${go2rtcHost}:1984/api/stream.mp4?src=${camera.streamName}`;
-      console.log(`[Camera Debug] go2rtc URL for ${camera.name}:`, {
-        cameraId: camera.id,
-        streamName: camera.streamName,
-        url: url,
-        host: go2rtcHost
-      });
+      // Use go2rtc MP4 endpoint for better browser compatibility
+      // This is simpler and more reliable than WebSocket MSE
+      const url = `http://${go2rtcHost}:${go2rtcPort}/api/stream.mp4?src=${camera.streamName}`;
+      console.log(`[Camera Debug] MP4 URL for ${camera.name}:`, url);
       cameraUrls[camera.id] = url;
+
+      // Initialize video state
+      if (!videoStates[camera.id]) {
+        videoStates[camera.id] = {
+          loading: true,
+          error: false,
+          errorMessage: ''
+        };
+      }
     });
   }
-  
+
   function selectCamera(camera) {
     selectedCamera = selectedCamera?.id === camera.id ? null : camera;
   }
-  
+
   function refreshCamera(cameraId) {
-    // Force refresh by updating the URL with a timestamp
-    const url = `/api/protect/cameras/${cameraId}/snapshot?t=${Date.now()}`;
-    cameraUrls[cameraId] = url;
-    // Trigger reactivity
-    cameraUrls = {...cameraUrls};
+    // Force refresh by reloading the video element
+    const videoEl = videoElements[cameraId];
+    if (videoEl) {
+      console.log(`[Camera Debug] Refreshing camera ${cameraId}`);
+      videoStates[cameraId] = { loading: true, error: false, errorMessage: '' };
+      videoStates = {...videoStates};
+
+      // Simply reload the video source
+      videoEl.load();
+      videoEl.play().catch(err => {
+        console.error(`[Camera Debug] Error playing ${cameraId}:`, err);
+        videoStates[cameraId] = {
+          loading: false,
+          error: true,
+          errorMessage: err.message
+        };
+        videoStates = {...videoStates};
+      });
+    }
   }
-  
+
+  function onVideoLoaded(cameraId) {
+    console.log(`[Camera Debug] Video loaded for ${cameraId}`);
+    videoStates[cameraId] = { loading: false, error: false, errorMessage: '' };
+    videoStates = {...videoStates};
+  }
+
+  function onVideoError(cameraId, event) {
+    const videoEl = videoElements[cameraId];
+    let errorMessage = 'Failed to load video stream';
+
+    if (videoEl?.error) {
+      switch (videoEl.error.code) {
+        case 1: errorMessage = 'Video loading aborted'; break;
+        case 2: errorMessage = 'Network error'; break;
+        case 3: errorMessage = 'Video decode error'; break;
+        case 4: errorMessage = 'Video format not supported'; break;
+        default: errorMessage = `Error code: ${videoEl.error.code}`;
+      }
+    }
+
+    console.error(`[Camera Debug] Video error for ${cameraId}:`, errorMessage, event);
+    videoStates[cameraId] = { loading: false, error: true, errorMessage };
+    videoStates = {...videoStates};
+  }
+
   // Auto-refresh cameras for live streaming effect
   let refreshInterval;
   let refreshRate = 500; // Refresh every 500ms for 2 FPS streaming
   let streamingEnabled = true;
-  
+
   function connectToMotionEvents() {
     // Note: WebSocket connections need to be proxied through nginx
     // For now, we'll display a status but actual WebSocket implementation
     // would need nginx WebSocket proxy configuration
     connectionStatus = 'connecting';
     console.log('[Motion Events] WebSocket connection would connect to UniFi Protect');
-    
+
     // Simulate connection for UI display
     setTimeout(() => {
       connectionStatus = 'connected';
       console.log('[Motion Events] Ready to receive motion events');
     }, 1000);
   }
-  
+
   function addMotionEvent(event) {
     const now = new Date();
     motionEvents = [{
@@ -103,54 +160,45 @@
       timeStr: now.toLocaleTimeString()
     }, ...motionEvents].slice(0, 20); // Keep last 20 events
   }
-  
-  function initializeStreams() {
-    console.log('[Streams] Initializing direct MSE streams');
 
-    cameras.forEach(camera => {
-      const videoElement = document.getElementById(`video-${camera.id}`);
-
-      if (videoElement) {
-        // Use MSE endpoint directly from go2rtc
-        const streamUrl = `http://${go2rtcHost}:1984/api/stream.mp4?src=${camera.streamName}`;
-
-        console.log(`[Streams] Setting stream URL for ${camera.name}: ${streamUrl}`);
-
-        // Set the source
-        videoElement.src = streamUrl;
-
-        // Ensure video plays
-        videoElement.play().catch(err => {
-          console.warn(`[Streams] Auto-play blocked for ${camera.name}, user interaction may be required:`, err);
-        });
-      }
-    });
-  }
-  
   onMount(() => {
-    console.log('[Camera Debug] Component mounted with MSE streaming');
-    console.log('[Camera Debug] go2rtc host:', go2rtcHost);
-
-    // Set camera URLs for initial display
-    cameras.forEach(camera => {
-      cameraUrls[camera.id] = `http://${go2rtcHost}:1984/api/stream.mp4?src=${camera.streamName}`;
-    });
-    cameraUrls = {...cameraUrls};
-
-    // Initialize streams after DOM is ready
-    setTimeout(initializeStreams, 100);
+    console.log('[Camera Debug] Component mounted - using MP4 video streaming');
+    console.log('[Camera Debug] go2rtc host:', go2rtcHost, 'port:', go2rtcPort);
+    console.log('[Camera Debug] MP4 endpoint format: /api/stream.mp4?src={streamName}');
 
     // Connect to motion events
     connectToMotionEvents();
 
-    // No need for refresh interval with MSE streams
-    // The video elements handle streaming automatically
+    // Initialize video playback for all cameras
+    cameras.forEach(camera => {
+      const videoEl = videoElements[camera.id];
+      if (videoEl) {
+        const streamUrl = cameraUrls[camera.id];
+        console.log(`[Camera Debug] ${camera.name} - Setting MP4 stream:`, streamUrl);
+
+        // Simply set the video source to the MP4 stream
+        videoEl.src = streamUrl;
+
+        // Auto-play with error handling
+        videoEl.play().catch(err => {
+          console.warn(`[Camera Debug] Auto-play prevented for ${camera.name}:`, err.message);
+        });
+      }
+    });
   });
-  
+
   onDestroy(() => {
     if (refreshInterval) {
       clearInterval(refreshInterval);
     }
+
+    // Stop all video playback
+    Object.values(videoElements).forEach(videoEl => {
+      if (videoEl) {
+        videoEl.pause();
+        videoEl.src = '';
+      }
+    });
   });
 </script>
 
@@ -193,21 +241,50 @@
         </div>
         
         <div class="camera-feed">
-          <!-- Direct video element with MSE stream -->
+          <!-- Use native HTML5 video with HLS for iOS PWA compatibility -->
           <video
+            bind:this={videoElements[camera.id]}
             id="video-{camera.id}"
-            class="camera-image camera-stream"
+            class="camera-image"
             autoplay
             muted
             playsinline
             controls={false}
-            on:loadeddata={() => console.log(`[Camera] Stream loaded for ${camera.name}`)}
-            on:error={(e) => {
-              console.error(`[Camera] Failed to load stream for ${camera.name}`, e);
+            on:loadeddata={() => onVideoLoaded(camera.id)}
+            on:error={(e) => onVideoError(camera.id, e)}
+            on:waiting={() => {
+              videoStates[camera.id] = {...videoStates[camera.id], loading: true};
+              videoStates = {...videoStates};
+            }}
+            on:playing={() => {
+              videoStates[camera.id] = {...videoStates[camera.id], loading: false};
+              videoStates = {...videoStates};
             }}
           >
-            Your browser doesn't support video playback
+            Your browser does not support video playback.
           </video>
+
+          <!-- Loading overlay -->
+          {#if videoStates[camera.id]?.loading}
+            <div class="video-overlay">
+              <div class="loading-spinner"></div>
+              <p class="text-xs text-gray-400 mt-2">Loading stream...</p>
+            </div>
+          {/if}
+
+          <!-- Error overlay -->
+          {#if videoStates[camera.id]?.error}
+            <div class="video-overlay">
+              <div class="error-icon">⚠️</div>
+              <p class="text-xs text-red-400 mt-2">{videoStates[camera.id].errorMessage}</p>
+              <button
+                class="retry-button"
+                on:click={() => refreshCamera(camera.id)}
+              >
+                Retry
+              </button>
+            </div>
+          {/if}
         </div>
         
         <!-- Camera Details -->
@@ -325,7 +402,7 @@
   
   .camera-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
     gap: 1.5rem;
     margin-bottom: 3rem;
   }
@@ -417,6 +494,58 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  .video-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(10px);
+    z-index: 10;
+  }
+
+  .loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(0, 212, 255, 0.2);
+    border-top-color: #00d4ff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .error-icon {
+    font-size: 3rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .retry-button {
+    margin-top: 1rem;
+    padding: 0.5rem 1.5rem;
+    background: rgba(0, 212, 255, 0.1);
+    border: 1px solid rgba(0, 212, 255, 0.3);
+    border-radius: 8px;
+    color: #00d4ff;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    transition: all 300ms ease;
+  }
+
+  .retry-button:hover {
+    background: rgba(0, 212, 255, 0.2);
+    border-color: rgba(0, 212, 255, 0.5);
   }
   
   .camera-stream {

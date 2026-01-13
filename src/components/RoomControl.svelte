@@ -1,9 +1,18 @@
 <script>
   import { haStore } from '../stores/haStore';
-  
+
   export let room;
   export let entities;
-  
+
+  // Debounce helper to prevent WebSocket flooding on slider changes
+  function debounce(fn, delay = 300) {
+    let timeoutId;
+    return function(...args) {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => fn(...args), delay);
+    };
+  }
+
   function toggleLight(entityId) {
     if (!entities[entityId]) return;
     
@@ -13,16 +22,22 @@
   }
   
   function setBrightness(entityId, brightness) {
-    haStore.callService('light', 'turn_on', entityId, { 
-      brightness_pct: brightness 
+    haStore.callService('light', 'turn_on', entityId, {
+      brightness_pct: brightness
     });
   }
-  
+
+  // Debounced version to prevent WebSocket flooding
+  const debouncedSetBrightness = debounce(setBrightness, 300);
+
   function setVolume(entityId, volume) {
-    haStore.callService('media_player', 'volume_set', entityId, { 
-      volume_level: volume / 100 
+    haStore.callService('media_player', 'volume_set', entityId, {
+      volume_level: volume / 100
     });
   }
+
+  // Debounced version for volume
+  const debouncedSetVolume = debounce(setVolume, 300);
   
   function toggleMedia(entityId) {
     if (!entities[entityId]) return;
@@ -58,6 +73,9 @@
       }
     });
   }
+
+  // Debounced version for light groups
+  const debouncedSetLightGroupBrightness = debounce(setLightGroupBrightness, 300);
 
   function setLightGroupColor(lightGroup, rgb) {
     lightGroup.entities.forEach(entityId => {
@@ -237,7 +255,7 @@
                     max="100" 
                     value={entities[lightId].attributes?.brightness ? 
                       Math.round(entities[lightId].attributes.brightness / 255 * 100) : 100}
-                    on:input={(e) => setBrightness(lightId, e.target.value)}
+                    on:input={(e) => debouncedSetBrightness(lightId, e.target.value)}
                     class="brightness-slider flex-1"
                   />
                   <button 
@@ -302,7 +320,7 @@
                   min="0"
                   max="100"
                   value={groupState.brightness}
-                  on:input={(e) => setLightGroupBrightness(lightGroup, e.target.value)}
+                  on:input={(e) => debouncedSetLightGroupBrightness(lightGroup, e.target.value)}
                   class="brightness-slider flex-1"
                 />
                 <button
@@ -428,7 +446,7 @@
             max="100" 
             value={entities[room.media].attributes?.volume_level ? 
               Math.round(entities[room.media].attributes.volume_level * 100) : 0}
-            on:input={(e) => setVolume(room.media, e.target.value)}
+            on:input={(e) => debouncedSetVolume(room.media, e.target.value)}
             class="volume-slider flex-1"
           />
           <button 

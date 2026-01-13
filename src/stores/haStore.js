@@ -13,16 +13,40 @@ function createHAStore() {
 
   const connect = () => {
       const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJkMTY4YjhmZDU1YTY0YzhkYmJhNDY3ODZkNTM1MWU5MyIsImlhdCI6MTc2MzU5MTMwMCwiZXhwIjoyMDc4OTUxMzAwfQ.Vyz4iRVr93i-LXo_6sg-nENo-TgTmrxPa1vhXDjWVLs';
-      // Store token in localStorage for camera access
-      localStorage.setItem('ha_token', token);
-      console.log('[HAStore Debug] Token stored in localStorage:', token.substring(0, 20) + '...');
-      
-      const wsUrl = 'ws://192.168.1.222:8123/api/websocket';
-      
+
+      // Store token in localStorage for camera access (iOS Private Browsing safe)
+      try {
+        localStorage.setItem('ha_token', token);
+        console.log('[HAStore Debug] Token stored in localStorage:', token.substring(0, 20) + '...');
+      } catch (e) {
+        console.warn('[HAStore Debug] localStorage not available (Private Browsing?), token stored in memory only');
+      }
+
+      // WebSocket URL for Home Assistant
+      // Always connect to Home Assistant server, not the dev server
+      // For local network addresses (192.168.x.x), always use ws:// (not wss://)
+      // because Home Assistant on local network doesn't support secure WebSocket
+      const host = '192.168.1.222'; // Home Assistant server IP
+      const port = '8123';
+      const protocol = 'ws:'; // Always use non-secure WebSocket for local network
+      const wsUrl = `${protocol}//${host}:${port}/api/websocket`;
+
+      console.log('[HAStore Debug] Connecting to WebSocket:', wsUrl);
+      const startTime = Date.now();
       ws = new WebSocket(wsUrl);
+
+      // Connection timeout - fail fast on iOS
+      const connectionTimeout = setTimeout(() => {
+        if (ws.readyState !== WebSocket.OPEN) {
+          console.warn('[HAStore Debug] Connection timeout after 5s, closing and retrying');
+          ws.close();
+        }
+      }, 5000);
       
       ws.onopen = () => {
-        console.log('WebSocket connected');
+        clearTimeout(connectionTimeout);
+        const elapsed = Date.now() - startTime;
+        console.log(`[HAStore Debug] WebSocket connected in ${elapsed}ms`);
       };
       
       ws.onmessage = (event) => {

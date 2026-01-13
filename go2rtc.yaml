@@ -2,16 +2,17 @@
 streams:
   front_door:
     - rtsps://192.168.1.1:7441/YyfL3xBqfxqPhbaB
-  
+
   garage:
     - rtsps://192.168.1.1:7441/vpIQMNsvjTFvbOL4
-  
+
   east_camera:
     - rtsps://192.168.1.1:7441/lIn96UL9blXDxYyF
 
 # API for web access
 api:
   listen: ":1984"
+  origin: "*"  # Allow WebSocket connections from any origin
 
 # WebRTC for low-latency browser streaming  
 webrtc:

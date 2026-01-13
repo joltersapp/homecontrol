@@ -8,6 +8,7 @@
   import SecurityView from './components/SecurityView.svelte';
   import MasterLights from './components/MasterLights.svelte';
   import PoolControl from './components/PoolControl.svelte';
+  import TemperatureControl from './components/TemperatureControl.svelte';
   import { haStore } from './stores/haStore.js';
   import { version, buildTime, buildNumber } from './version.js';
   
@@ -15,51 +16,21 @@
   let entities = {};
   let activeRoom = null;
   let currentView = 'home'; // 'home', 'audio', or 'security'
-  let kitchenLivingLightsOn = false;
-  
-  const kitchenLivingLights = [
-    'light.kitchen_light',
-    'light.left_kitchen_light',
-    'light.right_kitchen_lights',
-    'light.living_room_light',
-    'switch.family_room_lamp',
-    'switch.kichten_cabinet_light'
-  ];
 
   const unsubscribe = haStore.subscribe(state => {
     connected = state.connected;
     entities = state.entities;
-    
-    // Check if any kitchen/living lights are on
-    if (Object.keys(entities).length > 0) {
-      kitchenLivingLightsOn = kitchenLivingLights.some(entityId => 
-        entities[entityId]?.state === 'on'
-      );
-    }
   });
   
   onMount(() => {
     haStore.connect();
-    
+
     return () => {
       unsubscribe();
       haStore.disconnect();
     };
   });
-  
-  // Toggle kitchen and living room lights
-  function toggleKitchenLivingLights() {
-    const action = kitchenLivingLightsOn ? 'turn_off' : 'turn_on';
-    
-    kitchenLivingLights.forEach(entityId => {
-      if (entityId.startsWith('light.')) {
-        haStore.callService('light', action, entityId);
-      } else if (entityId.startsWith('switch.')) {
-        haStore.callService('switch', action, entityId);
-      }
-    });
-  }
-  
+
   const rooms = [
     { 
       id: 'living', 
@@ -71,7 +42,7 @@
     {
       id: 'kitchen',
       name: 'Kitchen',
-      lights: ['light.kitchen_light', 'light.left_kitchen_light', 'light.right_kitchen_lights', 'light.kichten_cabinet_light', 'switch.kichten_cabinet_light'],
+      lights: ['light.kitchen_light', 'light.left_kitchen_light', 'light.right_kitchen_lights', 'light.kitchen_cabinet_light', 'switch.kitchen_cabinet_light'],
       media: 'media_player.kitchen'
     },
     {
@@ -130,22 +101,81 @@
   ];
 </script>
 
-<main class="min-h-screen bg-gradient-to-b from-gray-950 via-black to-gray-950 text-gray-100">
+<main class="min-h-screen bg-gradient-to-b from-gray-950 via-black to-gray-950 text-gray-100 ios-safe-area">
   <!-- Subtle animated background -->
   <div class="fixed inset-0 overflow-hidden pointer-events-none opacity-30">
     <div class="absolute -top-40 -right-40 w-96 h-96 bg-cyan-500/20 rounded-full filter blur-[100px] animate-drift"></div>
     <div class="absolute -bottom-40 -left-40 w-96 h-96 bg-blue-500/20 rounded-full filter blur-[100px] animate-drift-delayed"></div>
   </div>
-  
-  <div class="relative z-10 max-w-7xl mx-auto px-4 py-6">
+
+  <div class="relative z-10 max-w-7xl mx-auto px-4 py-6 ios-content">
     <!-- Header -->
-    <header class="mb-8" in:fly={{ y: -20, duration: 600, easing: cubicOut }}>
-      <div class="flex items-center justify-between">
+    <header class="mb-6 md:mb-8" in:fly={{ y: -20, duration: 600, easing: cubicOut }}>
+      <!-- Mobile Header -->
+      <div class="md:hidden">
+        <div class="flex items-center justify-between mb-4">
+          <h1 class="text-2xl font-extralight tracking-wider text-gray-100">
+            HOME<span class="text-cyan-400 font-light">CONTROL</span>
+          </h1>
+          <div class="flex items-center gap-2">
+            <div class="w-1.5 h-1.5 rounded-full {connected ? 'bg-cyan-400' : 'bg-red-400'} animate-pulse"></div>
+            <span class="text-xs uppercase tracking-wider text-gray-400">
+              {connected ? 'Online' : 'Offline'}
+            </span>
+          </div>
+        </div>
+        <!-- Mobile Navigation - Scrollable -->
+        <nav class="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 no-scrollbar">
+          <button
+            class="nav-button flex-shrink-0 {currentView === 'home' ? 'active' : ''}"
+            on:click={() => currentView = 'home'}
+          >
+            Rooms
+          </button>
+          <button
+            class="nav-button flex-shrink-0 {currentView === 'lights' ? 'active' : ''}"
+            on:click={() => currentView = 'lights'}
+          >
+            Lights
+          </button>
+          <button
+            class="nav-button flex-shrink-0 {currentView === 'audio' ? 'active' : ''}"
+            on:click={() => currentView = 'audio'}
+          >
+            Audio
+          </button>
+          <button
+            class="nav-button flex-shrink-0 {currentView === 'security' ? 'active' : ''}"
+            on:click={() => {
+              console.log('[App Debug] Switching to security view');
+              console.log('[App Debug] Available entities:', Object.keys(entities).filter(k => k.includes('camera')));
+              currentView = 'security';
+            }}
+          >
+            Security
+          </button>
+          <button
+            class="nav-button flex-shrink-0 {currentView === 'pool' ? 'active' : ''}"
+            on:click={() => currentView = 'pool'}
+          >
+            Outside
+          </button>
+          <button
+            class="nav-button flex-shrink-0 {currentView === 'climate' ? 'active' : ''}"
+            on:click={() => currentView = 'climate'}
+          >
+            Climate
+          </button>
+        </nav>
+      </div>
+
+      <!-- Desktop Header -->
+      <div class="hidden md:flex items-center justify-between">
         <div class="flex items-center gap-3">
           <h1 class="text-3xl font-extralight tracking-widest text-gray-100">
             HOME<span class="text-cyan-400 font-light">CONTROL</span>
           </h1>
-          <span 
+          <span
             class="text-xs text-gray-500 font-mono mt-2 cursor-help"
             title="Build #{buildNumber} - {new Date(buildTime).toLocaleString()}"
           >
@@ -187,7 +217,13 @@
               class="nav-button {currentView === 'pool' ? 'active' : ''}"
               on:click={() => currentView = 'pool'}
             >
-              Pool
+              Outside
+            </button>
+            <button
+              class="nav-button {currentView === 'climate' ? 'active' : ''}"
+              on:click={() => currentView = 'climate'}
+            >
+              Climate
             </button>
           </nav>
           <div class="flex items-center gap-3">
@@ -261,25 +297,13 @@
       <div in:fly={{ x: 50, duration: 400, easing: cubicOut }}>
         <PoolControl {entities} />
       </div>
+    {:else if currentView === 'climate'}
+      <!-- Temperature Control Page -->
+      <div in:fly={{ x: 50, duration: 400, easing: cubicOut }}>
+        <TemperatureControl {entities} />
+      </div>
     {/if}
 
-    <!-- Quick Actions -->
-    <div class="fixed bottom-6 right-6 flex flex-col gap-2">
-      <button 
-        class="led-toggle-button {kitchenLivingLightsOn ? 'active' : ''}" 
-        on:click={toggleKitchenLivingLights}
-      >
-        <span class="led-indicator {kitchenLivingLightsOn ? 'on' : ''}"></span>
-        Kitchen & Living
-        <span class="status-text">{kitchenLivingLightsOn ? 'ON' : 'OFF'}</span>
-      </button>
-      <button class="glass-button">
-        Sleep Mode
-      </button>
-      <button class="glass-button">
-        Away Mode
-      </button>
-    </div>
   </div>
 </main>
 
@@ -291,6 +315,78 @@
     background: #0a0a0a;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* Prevent horizontal scroll on mobile */
+    overflow-x: hidden;
+  }
+
+  /* iOS PWA Safe Area Insets - Prevents content from hiding behind notch/home indicator */
+  :global(.ios-safe-area) {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  :global(.ios-content) {
+    /* Additional padding on top for status bar when in PWA mode */
+    padding-top: max(1.5rem, env(safe-area-inset-top));
+    /* Extra padding at bottom for iPhone home indicator */
+    padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+  }
+
+  /* Hide scrollbar for mobile navigation */
+  :global(.no-scrollbar::-webkit-scrollbar) {
+    display: none;
+  }
+
+  :global(.no-scrollbar) {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* Better touch scrolling on iOS */
+  :global(*) {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Touch Feedback for Mobile Devices */
+  @media (hover: none) and (pointer: coarse) {
+    /* Global touch feedback for all buttons and interactive elements */
+    :global(button:active),
+    :global(.btn:active),
+    :global([role="button"]:active),
+    :global(a:active),
+    :global(input[type="button"]:active),
+    :global(input[type="submit"]:active) {
+      transform: scale(0.96);
+      opacity: 0.85;
+      transition: transform 100ms ease-out, opacity 100ms ease-out;
+    }
+
+    /* Ensure minimum touch target size */
+    :global(button),
+    :global(.btn),
+    :global([role="button"]),
+    :global(input[type="button"]),
+    :global(input[type="submit"]) {
+      min-width: 44px;
+      min-height: 44px;
+    }
+
+    /* Disable hover effects on touch devices */
+    :global(.glass:hover),
+    :global(.glass-button:hover),
+    :global(.nav-button:hover) {
+      transform: none;
+    }
+  }
+
+  /* Preserve hover effects on desktop */
+  @media (hover: hover) and (pointer: fine) {
+    :global(button:hover),
+    :global(.btn:hover) {
+      cursor: pointer;
+    }
   }
 
   .glass {
@@ -337,88 +433,9 @@
   .glass-button:active {
     transform: scale(0.98);
   }
-  
-  /* LED Toggle Button */
-  .led-toggle-button {
-    position: relative;
-    padding: 0.875rem 1.75rem;
-    padding-left: 3rem;
-    background: rgba(255, 255, 255, 0.04);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    font-size: 0.8125rem;
-    font-weight: 300;
-    letter-spacing: 0.025em;
-    color: rgba(255, 255, 255, 0.6);
-    transition: all 300ms cubic-bezier(0.4, 0, 0.2, 1);
-    cursor: pointer;
-    text-transform: uppercase;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-  
-  .led-toggle-button:hover {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.12);
-  }
-  
-  .led-toggle-button.active {
-    background: rgba(0, 212, 255, 0.1);
-    border-color: rgba(0, 212, 255, 0.3);
-    color: rgba(255, 255, 255, 0.9);
-  }
-  
-  .led-toggle-button.active:hover {
-    background: rgba(0, 212, 255, 0.15);
-    border-color: rgba(0, 212, 255, 0.4);
-  }
-  
-  .led-indicator {
-    position: absolute;
-    left: 1rem;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.2);
-    transition: all 300ms ease;
-  }
-  
-  .led-indicator.on {
-    background: #00ff88;
-    box-shadow: 
-      0 0 10px rgba(0, 255, 136, 0.8),
-      0 0 20px rgba(0, 255, 136, 0.4),
-      inset 0 0 5px rgba(255, 255, 255, 0.5);
-    animation: led-pulse 2s infinite;
-  }
-  
-  @keyframes led-pulse {
-    0%, 100% { 
-      opacity: 1;
-      box-shadow: 
-        0 0 10px rgba(0, 255, 136, 0.8),
-        0 0 20px rgba(0, 255, 136, 0.4),
-        inset 0 0 5px rgba(255, 255, 255, 0.5);
-    }
-    50% { 
-      opacity: 0.8;
-      box-shadow: 
-        0 0 15px rgba(0, 255, 136, 1),
-        0 0 30px rgba(0, 255, 136, 0.6),
-        inset 0 0 5px rgba(255, 255, 255, 0.5);
-    }
-  }
-  
-  .status-text {
-    font-size: 0.75rem;
-    opacity: 0.7;
-    margin-left: auto;
-  }
-  
+
   .nav-button {
-    padding: 0.5rem 1.25rem;
+    padding: 0.75rem 1.25rem;
     background: rgba(255, 255, 255, 0.02);
     backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.06);
@@ -430,6 +447,11 @@
     transition: all 300ms cubic-bezier(0.4, 0, 0.2, 1);
     cursor: pointer;
     text-transform: uppercase;
+    /* Minimum touch target size for mobile */
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
   
   .nav-button:hover {

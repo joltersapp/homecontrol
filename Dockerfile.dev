@@ -1,10 +1,22 @@
 FROM node:20-alpine
 
+# Install build dependencies for native modules
+RUN apk add --no-cache python3 make g++
+
 WORKDIR /app
 
+# Copy package files and install dependencies
 COPY package.json package-lock.json ./
 RUN npm install
 
-EXPOSE 5173
+# Rebuild native modules for Alpine Linux
+RUN npm rebuild better-sqlite3
 
+# Copy all source code for hot reload
+COPY . .
+
+# Expose port 8080 for Vite
+EXPOSE 8080
+
+# Run both Vite and backend server via concurrently
 CMD ["npm", "run", "dev"]

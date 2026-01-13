@@ -8,15 +8,21 @@ services:
     container_name: ha-svelte-dashboard-dev
     ports:
       - "8080:8080"
+      - "3001:3001"
     volumes:
       - ./src:/app/src
+      - ./server:/app/server
+      - ./data:/app/data
       - ./index.html:/app/index.html
       - ./vite.config.js:/app/vite.config.js
       - ./scripts:/app/scripts
       - ./package.json:/app/package.json
     environment:
       - HA_URL=http://192.168.1.222:8123
-      - HA_TOKEN=${HA_TOKEN}
+      - HA_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJkMTY4YjhmZDU1YTY0YzhkYmJhNDY3ODZkNTM1MWU5MyIsImlhdCI6MTc2MzU5MTMwMCwiZXhwIjoyMDc4OTUxMzAwfQ.Vyz4iRVr93i-LXo_6sg-nENo-TgTmrxPa1vhXDjWVLs
+      - GEMINI_API_KEY=AIzaSyB3MR3Qs23ksBd9lBSxh0OnDhzgmNrMTag
+      - LOCATION=Miami, FL
+      - NODE_OPTIONS=--max-old-space-size=192
     restart: unless-stopped
     depends_on:
       - go2rtc

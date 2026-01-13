@@ -28,8 +28,16 @@
       }
       
       artist = entity.attributes?.media_artist || '';
-      albumArt = entity.attributes?.entity_picture ? 
-        `http://192.168.1.222:8123${entity.attributes.entity_picture}` : null;
+
+      // Album art URL from Home Assistant server
+      if (entity.attributes?.entity_picture) {
+        const protocol = window.location.protocol;
+        const host = '192.168.1.222'; // Home Assistant server IP
+        const port = '8123';
+        albumArt = `${protocol}//${host}:${port}${entity.attributes.entity_picture}`;
+      } else {
+        albumArt = null;
+      }
     }
   });
   

@@ -2,34 +2,44 @@
   import { haStore } from '../stores/haStore';
   import { api } from '../lib/api';
   import { onMount, onDestroy } from 'svelte';
+  import JobHistory from './JobHistory.svelte';
 
   export let entities;
 
-  // Local state tracking (optimistic UI)
-  let sprinklerState = false;
-  let poolPumpState = false;
-  let poolLightState = false;
+  // Derive device states from Home Assistant input_boolean entities (source of truth)
+  $: sprinklerState = entities?.['input_boolean.sprinkler_state']?.state === 'on';
+  $: poolPumpState = entities?.['input_boolean.pool_pump_state']?.state === 'on';
+  $: poolLightState = entities?.['input_boolean.pool_light_state']?.state === 'on';
 
-  // Pool pump scheduling
+  // Pool pump scheduling (now managed by backend)
   let pumpScheduleEnabled = false;
   let pumpSchedule = {
-    morningStart: '06:00',
-    morningHours: 6,
-    eveningStart: '21:00',
-    eveningHours: 4,
-    totalHours: 10,
+    hours: 8,
+    totalHours: 8,
     reason: 'Not calculated yet',
-    nextAction: 'Enable auto-schedule to begin',
-    morningActive: false,
-    eveningActive: false
+    startTime: '10:00',
+    nextStart: null,
+    nextEnd: null
   };
+  let isRunning = false;
+  let rainExtensionApplied = false;
 
   let pumpJobHistory = [];
   let sprinklerJobHistory = [];
-  let scheduleTimers = [];
-  let scheduleCheckInterval = null;
+  let sprinklerAIDecisions = [];
   let currentPumpJob = null;
   let currentSprinklerJob = null;
+  let scheduleRefreshInterval = null;
+
+  // AI decision from app (not HA)
+  let aiDecisionData = {
+    duration: 15,
+    temperature: null,
+    humidity: null,
+    forecast: null,
+    reasoning: 'Loading AI decision...',
+    calculated: false
+  };
 
   async function startJobTracking(device, session = null) {
     const conditions = {};
@@ -38,9 +48,15 @@
       conditions.temperature = entities?.['sensor.nws_temperature']?.state;
       conditions.reason = pumpSchedule.reason;
     } else if (device === 'Sprinkler') {
-      conditions.aiDecision = entities?.['input_text.sprinkler_ai_decision']?.state;
-      conditions.shouldWater = entities?.['input_boolean.sprinkler_should_water_today']?.state === 'on';
-      conditions.duration = entities?.['input_number.sprinkler_duration']?.state;
+      // Zone job - records actual zone runs
+      conditions.aiDecision = aiDecisionData.reasoning;
+      conditions.duration = aiDecisionData.duration;
+      conditions.temperature = aiDecisionData.temperature;
+      conditions.humidity = aiDecisionData.humidity;
+      conditions.forecast = aiDecisionData.forecast;
+      if (session) {
+        conditions.zone = session.replace('Zone ', ''); // Extract zone number
+      }
     }
 
     try {
@@ -77,306 +93,201 @@
     }
   }
 
+  async function runSprinklerCycle() {
+    const duration = aiDecisionData.duration || 15;
+    const durationMs = duration * 60 * 1000; // Convert minutes to milliseconds
+    const breakPeriodMs = 3 * 60 * 1000; // 3 minutes break between zones
+    const numZones = 4;
+
+    console.log(`Starting sprinkler cycle: ${numZones} zones, ${duration} min each, 3 min break`);
+
+    // Start job tracking for the full cycle
+    await startJobTracking('Sprinkler');
+
+    try {
+      for (let zone = 1; zone <= numZones; zone++) {
+        console.log(`Zone ${zone}: Turning pump ON for ${duration} minutes`);
+
+        // Turn pump ON
+        await haStore.callService('switch', 'turn_on', 'switch.sprinkler');
+
+        // Wait for zone duration
+        await new Promise(resolve => setTimeout(resolve, durationMs));
+
+        console.log(`Zone ${zone}: Turning pump OFF`);
+
+        // Turn pump OFF
+        await haStore.callService('switch', 'turn_off', 'switch.sprinkler');
+
+        // Wait for break period (except after last zone)
+        if (zone < numZones) {
+          console.log(`Break period: Waiting 3 minutes for check valve to rotate to Zone ${zone + 1}`);
+          await new Promise(resolve => setTimeout(resolve, breakPeriodMs));
+        }
+      }
+
+      console.log('Sprinkler cycle complete');
+    } catch (error) {
+      console.error('Sprinkler cycle error:', error);
+    } finally {
+      // End job tracking
+      await endJobTracking('Sprinkler');
+    }
+  }
+
   async function loadJobHistory(device) {
     try {
-      const result = await api.getJobs(device, 20);
       if (device === 'Pool Pump') {
+        const result = await api.getJobs(device, 20);
         pumpJobHistory = result.jobs;
       } else if (device === 'Sprinkler') {
-        sprinklerJobHistory = result.jobs;
+        // Fetch AI decisions (includes both water and skip decisions)
+        const decisionsResult = await api.getSprinklerHistory(30);
+        sprinklerAIDecisions = decisionsResult.data || [];
       }
     } catch (error) {
       console.error('Failed to load job history:', error);
     }
   }
 
-  function formatJobTime(date) {
-    // Handle both Date objects and ISO strings
-    const dateObj = typeof date === 'string' ? new Date(date) : date;
-    return dateObj.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    });
-  }
-
-  function formatDuration(minutes) {
-    if (minutes < 60) return `${minutes}m`;
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
-  }
-
-  // Load initial state from localStorage (for device states only)
-  if (typeof localStorage !== 'undefined') {
-    sprinklerState = localStorage.getItem('pool_sprinkler_state') === 'true';
-    poolPumpState = localStorage.getItem('pool_pump_state') === 'true';
-    poolLightState = localStorage.getItem('pool_light_state') === 'true';
-    pumpScheduleEnabled = localStorage.getItem('pool_pump_schedule_enabled') === 'true';
+  async function loadAIDecision() {
+    try {
+      const result = await api.getSprinklerDuration();
+      if (result.success && result.data) {
+        aiDecisionData = {
+          duration: result.data.duration,
+          temperature: result.data.temperature,
+          humidity: result.data.humidity,
+          forecast: result.data.forecast,
+          reasoning: result.data.reasoning,
+          calculated: result.data.calculated
+        };
+        console.log('AI Decision loaded:', aiDecisionData);
+      }
+    } catch (error) {
+      console.error('Failed to load AI decision:', error);
+    }
   }
 
   function toggleSprinkler() {
-    sprinklerState = !sprinklerState;
-    const action = sprinklerState ? 'on' : 'off';
+    // State is derived from HA entity, so we toggle based on current HA state
+    const action = sprinklerState ? 'off' : 'on';
     const scriptName = `turn_${action}_sprinkler`;
     haStore.callService('script', 'turn_on', `script.${scriptName}`);
-    localStorage.setItem('pool_sprinkler_state', sprinklerState.toString());
   }
 
   function togglePoolPump() {
-    poolPumpState = !poolPumpState;
-    const action = poolPumpState ? 'on' : 'off';
+    // State is derived from HA entity, so we toggle based on current HA state
+    const action = poolPumpState ? 'off' : 'on';
     const scriptName = `turn_${action}_pool_pump`;
     haStore.callService('script', 'turn_on', `script.${scriptName}`);
-    localStorage.setItem('pool_pump_state', poolPumpState.toString());
   }
 
   function togglePoolLight() {
-    poolLightState = !poolLightState;
-    const action = poolLightState ? 'on' : 'off';
+    // State is derived from HA entity, so we toggle based on current HA state
+    const action = poolLightState ? 'off' : 'on';
     const scriptName = `turn_${action}_pool_light`;
     haStore.callService('script', 'turn_on', `script.${scriptName}`);
-    localStorage.setItem('pool_light_state', poolLightState.toString());
   }
 
-  // Calculate pool pump schedule based on temperature and season
-  async function calculateSchedule() {
-    const temp = entities?.['sensor.nws_temperature']?.state ? parseFloat(entities['sensor.nws_temperature'].state) : 80;
-    const month = new Date().getMonth() + 1; // 1-12
-    const isSummer = month >= 5 && month <= 10;
-
-    let morningHours, eveningHours, reason;
-
-    if (isSummer) {
-      if (temp > 90) {
-        morningHours = 7;
-        eveningHours = 5;
-        reason = `Summer + Very hot (${temp}°F) = 12hrs total`;
-      } else if (temp >= 85) {
-        morningHours = 6;
-        eveningHours = 4;
-        reason = `Summer + Hot (${temp}°F) = 10hrs total`;
-      } else {
-        morningHours = 5.5;
-        eveningHours = 3.5;
-        reason = `Summer + Mild (${temp}°F) = 9hrs total`;
-      }
-    } else {
-      if (temp > 80) {
-        morningHours = 5;
-        eveningHours = 3;
-        reason = `Winter + Warm (${temp}°F) = 8hrs total`;
-      } else if (temp < 65) {
-        morningHours = 3.5;
-        eveningHours = 1.5;
-        reason = `Winter + Cool (${temp}°F) = 5hrs total`;
-      } else {
-        morningHours = 5;
-        eveningHours = 2;
-        reason = `Winter + Normal (${temp}°F) = 7hrs total`;
-      }
-    }
-
-    pumpSchedule = {
-      ...pumpSchedule,
-      morningHours,
-      eveningHours,
-      totalHours: morningHours + eveningHours,
-      reason,
-      morningStart: '06:00',
-      eveningStart: '21:00'
-    };
-
+  // Fetch pool schedule from backend
+  async function fetchPoolSchedule() {
     try {
-      await api.saveSchedule('Pool Pump', pumpSchedule);
-    } catch (error) {
-      console.error('Failed to save schedule:', error);
-    }
+      const response = await fetch('/api/pool/schedule');
+      const data = await response.json();
 
-    updateNextAction();
+      if (data.success) {
+        pumpScheduleEnabled = data.enabled;
+        pumpSchedule = data.schedule;
+        isRunning = data.isRunning;
+        rainExtensionApplied = data.rainExtensionApplied;
+      }
+    } catch (error) {
+      console.error('Failed to fetch pool schedule:', error);
+    }
   }
 
-  // Update next action text
-  function updateNextAction() {
+  // Toggle pool scheduler (enable/disable backend scheduler)
+  async function togglePumpSchedule() {
+    try {
+      const response = await fetch('/api/pool/schedule/toggle', {
+        method: 'POST'
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        pumpScheduleEnabled = data.enabled;
+        pumpSchedule = data.schedule;
+        isRunning = data.isRunning;
+        rainExtensionApplied = data.rainExtensionApplied;
+      }
+    } catch (error) {
+      console.error('Failed to toggle pool schedule:', error);
+    }
+  }
+
+  // Force recalculate schedule
+  async function recalculateSchedule() {
+    try {
+      const response = await fetch('/api/pool/schedule/recalculate', {
+        method: 'POST'
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        pumpSchedule = data.schedule;
+        await fetchPoolSchedule(); // Refresh full schedule
+      }
+    } catch (error) {
+      console.error('Failed to recalculate schedule:', error);
+    }
+  }
+
+  // Format time for display
+  function formatTime(isoString) {
+    if (!isoString) return 'N/A';
+    const date = new Date(isoString);
+    return date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone: 'America/New_York'
+    });
+  }
+
+  // Get next action text
+  function getNextAction() {
     if (!pumpScheduleEnabled) {
-      pumpSchedule.nextAction = 'Enable auto-schedule to begin';
-      return;
+      return 'Enable auto-schedule to begin';
     }
 
-    const now = new Date();
-    const currentTime = now.getHours() * 60 + now.getMinutes();
-
-    const [morningH, morningM] = pumpSchedule.morningStart.split(':').map(Number);
-    const morningStartMin = morningH * 60 + morningM;
-    const morningEndMin = morningStartMin + (pumpSchedule.morningHours * 60);
-
-    const [eveningH, eveningM] = pumpSchedule.eveningStart.split(':').map(Number);
-    const eveningStartMin = eveningH * 60 + eveningM;
-    const eveningEndMin = eveningStartMin + (pumpSchedule.eveningHours * 60);
-
-    if (pumpSchedule.morningActive) {
-      pumpSchedule.nextAction = `Morning session ends at ${formatEndTime(morningEndMin)}`;
-    } else if (pumpSchedule.eveningActive) {
-      pumpSchedule.nextAction = `Evening session ends at ${formatEndTime(eveningEndMin)}`;
-    } else if (currentTime < morningStartMin) {
-      pumpSchedule.nextAction = `Morning session starts at ${pumpSchedule.morningStart}`;
-    } else if (currentTime < eveningStartMin) {
-      pumpSchedule.nextAction = `Evening session starts at ${pumpSchedule.eveningStart}`;
-    } else {
-      pumpSchedule.nextAction = `Next morning session at ${pumpSchedule.morningStart}`;
-    }
-  }
-
-  function formatEndTime(totalMinutes) {
-    const hours = Math.floor(totalMinutes / 60) % 24;
-    const minutes = Math.floor(totalMinutes % 60);
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    const displayHours = hours % 12 || 12;
-    return `${displayHours}:${minutes.toString().padStart(2, '0')} ${ampm}`;
-  }
-
-  // Setup schedule timers
-  function setupScheduleTimers() {
-    // Clear existing timers
-    scheduleTimers.forEach(timer => clearTimeout(timer));
-    scheduleTimers = [];
-
-    if (!pumpScheduleEnabled) return;
-
-    const now = new Date();
-    const currentTime = now.getHours() * 60 + now.getMinutes();
-
-    // Morning session
-    const [morningH, morningM] = pumpSchedule.morningStart.split(':').map(Number);
-    const morningStartMin = morningH * 60 + morningM;
-    const morningEndMin = morningStartMin + (pumpSchedule.morningHours * 60);
-
-    // Evening session
-    const [eveningH, eveningM] = pumpSchedule.eveningStart.split(':').map(Number);
-    const eveningStartMin = eveningH * 60 + eveningM;
-    const eveningEndMin = eveningStartMin + (pumpSchedule.eveningHours * 60);
-
-    // Schedule morning start
-    if (currentTime < morningStartMin) {
-      const delay = (morningStartMin - currentTime) * 60 * 1000;
-      scheduleTimers.push(setTimeout(() => startMorningSession(), delay));
-    } else if (currentTime >= morningStartMin && currentTime < morningEndMin) {
-      // Currently in morning session
-      pumpSchedule.morningActive = true;
-      const delay = (morningEndMin - currentTime) * 60 * 1000;
-      scheduleTimers.push(setTimeout(() => stopMorningSession(), delay));
+    if (isRunning) {
+      const endTime = pumpSchedule.nextEnd ? formatTime(pumpSchedule.nextEnd) : 'calculating...';
+      return `Pump running until ${endTime}${rainExtensionApplied ? ' (rain extension applied)' : ''}`;
     }
 
-    // Schedule evening start
-    if (currentTime < eveningStartMin) {
-      const delay = (eveningStartMin - currentTime) * 60 * 1000;
-      scheduleTimers.push(setTimeout(() => startEveningSession(), delay));
-    } else if (currentTime >= eveningStartMin && currentTime < eveningEndMin) {
-      // Currently in evening session
-      pumpSchedule.eveningActive = true;
-      const delay = (eveningEndMin - currentTime) * 60 * 1000;
-      scheduleTimers.push(setTimeout(() => stopEveningSession(), delay));
-    }
+    const nextStart = pumpSchedule.nextStart ? formatTime(pumpSchedule.nextStart) : 'calculating...';
+    return `Next session starts at ${nextStart}`;
   }
 
-  function startMorningSession() {
-    haStore.callService('script', 'turn_on', 'script.turn_on_pool_pump');
-    pumpSchedule.morningActive = true;
-    poolPumpState = true;
-    localStorage.setItem('pool_pump_state', 'true');
-    startJobTracking('Pool Pump', 'Morning');
-    updateNextAction();
-
-    // Schedule stop
-    const delay = pumpSchedule.morningHours * 60 * 60 * 1000;
-    scheduleTimers.push(setTimeout(() => stopMorningSession(), delay));
-  }
-
-  function stopMorningSession() {
-    haStore.callService('script', 'turn_on', 'script.turn_off_pool_pump');
-    pumpSchedule.morningActive = false;
-    poolPumpState = false;
-    localStorage.setItem('pool_pump_state', 'false');
-    endJobTracking('Pool Pump');
-    updateNextAction();
-  }
-
-  function startEveningSession() {
-    haStore.callService('script', 'turn_on', 'script.turn_on_pool_pump');
-    pumpSchedule.eveningActive = true;
-    poolPumpState = true;
-    localStorage.setItem('pool_pump_state', 'true');
-    startJobTracking('Pool Pump', 'Evening');
-    updateNextAction();
-
-    // Schedule stop
-    const delay = pumpSchedule.eveningHours * 60 * 60 * 1000;
-    scheduleTimers.push(setTimeout(() => stopEveningSession(), delay));
-  }
-
-  function stopEveningSession() {
-    haStore.callService('script', 'turn_on', 'script.turn_off_pool_pump');
-    pumpSchedule.eveningActive = false;
-    poolPumpState = false;
-    localStorage.setItem('pool_pump_state', 'false');
-    endJobTracking('Pool Pump');
-    updateNextAction();
-  }
-
-  function togglePumpSchedule() {
-    pumpScheduleEnabled = !pumpScheduleEnabled;
-    localStorage.setItem('pool_pump_schedule_enabled', pumpScheduleEnabled.toString());
-
-    if (pumpScheduleEnabled) {
-      calculateSchedule();
-      setupScheduleTimers();
-    } else {
-      scheduleTimers.forEach(timer => clearTimeout(timer));
-      scheduleTimers = [];
-      pumpSchedule.morningActive = false;
-      pumpSchedule.eveningActive = false;
-      updateNextAction();
-    }
-  }
-
-  // Run daily schedule calculation at 5 AM
   onMount(async () => {
-    // Load schedule and job history from API
-    try {
-      const scheduleResult = await api.getSchedule('Pool Pump');
-      if (scheduleResult.schedule) {
-        pumpSchedule = scheduleResult.schedule.config;
-      }
-    } catch (error) {
-      console.error('Failed to load schedule:', error);
-    }
+    // Load pool schedule from backend
+    await fetchPoolSchedule();
+
+    // Load AI decision from app
+    await loadAIDecision();
 
     // Load job histories
     await loadJobHistory('Pool Pump');
     await loadJobHistory('Sprinkler');
 
-    // Check every minute if it's 5 AM
-    scheduleCheckInterval = setInterval(() => {
-      const now = new Date();
-      if (now.getHours() === 5 && now.getMinutes() === 0 && pumpScheduleEnabled) {
-        calculateSchedule();
-        setupScheduleTimers();
-      }
-      updateNextAction();
-    }, 60000); // Check every minute
-
-    // Initial calculation
-    if (pumpScheduleEnabled) {
-      calculateSchedule();
-      setupScheduleTimers();
-    }
+    // Refresh pool schedule every 30 seconds to keep UI in sync
+    scheduleRefreshInterval = setInterval(async () => {
+      await fetchPoolSchedule();
+    }, 30000);
   });
 
   onDestroy(() => {
-    scheduleTimers.forEach(timer => clearTimeout(timer));
-    if (scheduleCheckInterval) clearInterval(scheduleCheckInterval);
+    if (scheduleRefreshInterval) clearInterval(scheduleRefreshInterval);
   });
 
   // Helper to check if scripts exist
@@ -384,7 +295,8 @@
     return entities && entities[`script.${scriptName}`];
   }
 
-  const scriptsConfigured =
+  // Make scriptsConfigured reactive so it updates when entities load
+  $: scriptsConfigured =
     scriptExists('turn_on_sprinkler') ||
     scriptExists('turn_on_pool_pump') ||
     scriptExists('turn_on_pool_light');
@@ -417,7 +329,7 @@
             <circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 6v6"/></svg>
           <div>
             <h3 class="ai-title">Pool Pump Schedule</h3>
-            <p class="ai-subtitle">Temperature-based FPL off-peak optimization</p>
+            <p class="ai-subtitle">Miami-optimized peak sun operation with rain detection</p>
           </div>
         </div>
         <button
@@ -434,24 +346,24 @@
           <div class="status-item">
             <div class="status-content">
               <div class="status-label">What's Next</div>
-              <div class="status-value">{pumpSchedule.nextAction}</div>
+              <div class="status-value">{getNextAction()}</div>
             </div>
           </div>
           <div class="workflow-explanation">
-            Daily recalculation at 5:00 AM • Morning 6 AM-12 PM • Evening 9 PM-1 AM (off-peak)
+            Daily recalculation at 5:00 AM • Peak sun session at 10:00 AM • Auto rain detection
           </div>
         </div>
 
         <div class="ai-decision-section">
-          <p class="ai-reasoning">{pumpSchedule.reason}</p>
+          <p class="ai-reasoning">{pumpSchedule.reason || 'Calculating Miami-optimized schedule...'}</p>
           <div class="ai-details-grid">
             <div class="detail-item">
-              <span class="detail-label">Morning Session</span>
-              <span class="detail-value">{pumpSchedule.morningStart} ({pumpSchedule.morningHours}hrs)</span>
+              <span class="detail-label">Session Start</span>
+              <span class="detail-value">{pumpSchedule.startTime} (peak sun)</span>
             </div>
             <div class="detail-item">
-              <span class="detail-label">Evening Session</span>
-              <span class="detail-value">{pumpSchedule.eveningStart} ({pumpSchedule.eveningHours}hrs)</span>
+              <span class="detail-label">Duration</span>
+              <span class="detail-value">{pumpSchedule.hours} hours{rainExtensionApplied ? ' + rain ext' : ''}</span>
             </div>
             <div class="detail-item">
               <span class="detail-label">Total Runtime</span>
@@ -459,91 +371,26 @@
             </div>
           </div>
 
-          {#if pumpJobHistory.length > 0}
-            <div class="job-report">
-              <h4 class="job-report-title">Job History</h4>
-              <div class="job-table">
-                {#each pumpJobHistory.slice(0, 5) as job}
-                  <div class="job-row">
-                    <div class="job-session">
-                      <span class="job-label">{job.session || 'Manual'}</span>
-                    </div>
-                    <div class="job-time">
-                      <span class="job-date">{formatJobTime(job.start_time)}</span>
-                      <span class="job-duration">{formatDuration(job.duration)}</span>
-                    </div>
-                    {#if job.conditions?.temperature}
-                      <div class="job-conditions">
-                        <span class="job-temp">{job.conditions.temperature}°F</span>
-                      </div>
-                    {/if}
-                  </div>
-                {/each}
-              </div>
-            </div>
-          {/if}
+          <div class="manual-controls">
+            <button class="control-btn tertiary" on:click={recalculateSchedule}>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+              Recalculate Now
+            </button>
+          </div>
+
+          <JobHistory
+            jobs={pumpJobHistory}
+            title="Pool Pump Job History"
+            jobType="pool"
+          />
         </div>
       {/if}
     </div>
 
     <!-- Sprinkler AI Recommendation Card -->
-    {@const aiEnabled = entities['input_boolean.sprinkler_ai_enabled']?.state === 'on'}
-    {@const shouldWater = entities['input_boolean.sprinkler_should_water_today']?.state === 'on'}
-    {@const aiDecisionRaw = entities['input_text.sprinkler_ai_decision']?.state}
-    {@const duration = entities['input_number.sprinkler_duration']?.state || '10'}
-    {@const nextRunRaw = entities['input_datetime.sprinkler_next_run']?.state}
-    {@const lastRunRaw = entities['input_datetime.sprinkler_last_run']?.state}
+    {@const duration = aiDecisionData.duration}
+    {@const aiDecisionText = aiDecisionData.reasoning}
 
-    <!-- Computed values for better UX -->
-    {@const now = new Date()}
-    {@const currentHour = now.getHours()}
-
-    <!-- Determine next action status -->
-    {@const nextAction = (() => {
-      if (!aiEnabled) return { text: 'AI scheduling is disabled', time: '' };
-      if (!aiDecisionRaw || aiDecisionRaw === 'unknown') {
-        // Before first AI check
-        if (currentHour < 6) return { text: 'Next AI check', time: 'Today at 6:00 AM' };
-        return { text: 'Next AI check', time: 'Tomorrow at 6:00 AM' };
-      }
-      if (shouldWater) {
-        if (currentHour < 6) return { text: 'AI will check weather', time: 'Today at 6:00 AM' };
-        if (currentHour === 6 && now.getMinutes() < 30) return { text: 'Watering starts', time: 'Today at 6:30 AM' };
-        return { text: 'Next AI check', time: 'Tomorrow at 6:00 AM' };
-      }
-      return { text: 'Next AI check', time: 'Tomorrow at 6:00 AM' };
-    })()}
-
-    <!-- Format AI decision text -->
-    {@const aiDecision = !aiDecisionRaw || aiDecisionRaw === 'unknown'
-      ? 'Waiting for daily weather analysis at 6:00 AM'
-      : aiDecisionRaw}
-
-    <!-- Format times -->
-    {@const formatTime = (dateStr) => {
-      if (!dateStr || dateStr === 'Not scheduled') return 'Not set';
-      try {
-        const date = new Date(dateStr);
-        if (isNaN(date.getTime())) return 'Not set';
-        return date.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit'});
-      } catch {
-        return 'Not set';
-      }
-    }}
-
-    {@const formatDate = (dateStr) => {
-      if (!dateStr || dateStr === 'Never') return 'Never';
-      try {
-        const date = new Date(dateStr);
-        if (isNaN(date.getTime())) return 'Never';
-        return date.toLocaleDateString('en-US', {month: 'short', day: 'numeric'});
-      } catch {
-        return 'Never';
-      }
-    }}
-
-    {@const nextRun = formatTime(nextRunRaw)}
-    {@const lastRun = formatDate(lastRunRaw)}
 
     <div class="ai-recommendation-card glass mb-8">
       <div class="ai-header">
@@ -556,107 +403,78 @@
             <p class="ai-subtitle">AI-powered irrigation for Miami</p>
           </div>
         </div>
-        <button
-          class="ai-toggle-btn"
-          class:active={aiEnabled}
-          on:click={() => haStore.callService('input_boolean', aiEnabled ? 'turn_off' : 'turn_on', 'input_boolean.sprinkler_ai_enabled')}
-        >
-          {aiEnabled ? 'AI ON' : 'AI OFF'}
-        </button>
       </div>
 
-      {#if aiEnabled}
-        <!-- Status/Next Action Section -->
-        <div class="status-timeline">
-          <div class="status-item">
-            <div class="status-content">
-              <div class="status-label">What's Next</div>
-              <div class="status-value">{nextAction.text}</div>
-              {#if nextAction.time}
-                <div class="status-time">{nextAction.time}</div>
-              {/if}
-            </div>
-          </div>
-          <div class="workflow-explanation">
-            AI analyzes Miami weather daily at 6:00 AM • Auto-waters at 6:30 AM if needed
+      <!-- Status/Next Action Section -->
+      <div class="status-timeline">
+        <div class="status-item">
+          <div class="status-content">
+            <div class="status-label">What's Next</div>
+            <div class="status-value">Next AI check</div>
+            <div class="status-time">Tomorrow at 6:00 AM</div>
           </div>
         </div>
+        <div class="workflow-explanation">
+          AI analyzes Miami weather daily at 6:00 AM
+        </div>
+      </div>
 
-        <div class="ai-decision-section">
-          {#if aiDecisionRaw && aiDecisionRaw !== 'unknown'}
-            <div class="decision-badge" class:water={shouldWater} class:skip={!shouldWater}>
-              {shouldWater ? '💧 Water Today' : '⏭️ Skip Today'}
+      <div class="ai-decision-section">
+        <p class="ai-reasoning">{aiDecisionText}</p>
+        <div class="ai-details-grid">
+          <div class="detail-item">
+            <span class="detail-label">Duration/Zone</span>
+            <span class="detail-value">{duration} min</span>
+          </div>
+          {#if aiDecisionData.temperature}
+            <div class="detail-item">
+              <span class="detail-label">Temperature</span>
+              <span class="detail-value">{aiDecisionData.temperature}°F</span>
             </div>
           {/if}
-          <p class="ai-reasoning">{aiDecision}</p>
-          <div class="ai-details-grid">
+          {#if aiDecisionData.humidity}
             <div class="detail-item">
-              <span class="detail-label">Duration/Zone</span>
-              <span class="detail-value">{duration} min</span>
+              <span class="detail-label">Humidity</span>
+              <span class="detail-value">{aiDecisionData.humidity}%</span>
             </div>
+          {/if}
+          {#if aiDecisionData.forecast}
             <div class="detail-item">
-              <span class="detail-label">Next Run</span>
-              <span class="detail-value">{nextRun}</span>
+              <span class="detail-label">Forecast</span>
+              <span class="detail-value">{aiDecisionData.forecast}</span>
             </div>
-            <div class="detail-item">
-              <span class="detail-label">Last Run</span>
-              <span class="detail-value">{lastRun}</span>
-            </div>
-          </div>
+          {/if}
         </div>
+      </div>
 
-        <!-- Sprinkler Job History -->
-        {#if sprinklerJobHistory.length > 0}
-          <div class="job-report">
-            <h4 class="job-report-title">Sprinkler Job History</h4>
-            <div class="job-table">
-              {#each sprinklerJobHistory.slice(0, 5) as job}
-                <div class="job-row">
-                  <div class="job-time">
-                    <span class="job-date">{formatJobTime(job.start_time)}</span>
-                    <span class="job-duration">{formatDuration(job.duration)} per zone</span>
-                  </div>
-                  {#if job.conditions?.aiDecision}
-                    <div class="job-ai-reason">
-                      <span class="job-reason-text">{job.conditions.aiDecision}</span>
-                    </div>
-                  {/if}
-                </div>
-              {/each}
-            </div>
-          </div>
-        {/if}
+        <!-- Sprinkler AI Decision History -->
+        <JobHistory
+          jobs={sprinklerAIDecisions}
+          title="Sprinkler Job History"
+          jobType="sprinkler-ai"
+        />
 
         <!-- Manual Control Buttons -->
         <div class="manual-controls">
-          <button class="control-btn primary" on:click={() => {
-            startJobTracking('Sprinkler');
-            haStore.callService('script', 'turn_on', 'script.run_sprinkler_full_cycle');
-            const duration = entities?.['input_number.sprinkler_duration']?.state || 10;
-            setTimeout(() => endJobTracking('Sprinkler'), duration * 4 * 60 * 1000 + 6 * 60 * 1000);
-          }}>
+          <button class="control-btn primary" on:click={() => runSprinklerCycle()}>
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
-            Run All Zones
+            Run All Zones (4 cycles)
           </button>
-          <button class="control-btn secondary" on:click={() => {
-            startJobTracking('Sprinkler');
-            haStore.callService('script', 'turn_on', 'script.run_sprinkler_single_zone');
-            const duration = entities?.['input_number.sprinkler_duration']?.state || 10;
-            setTimeout(() => endJobTracking('Sprinkler'), duration * 60 * 1000);
+          <button class="control-btn secondary" on:click={async () => {
+            const duration = aiDecisionData.duration || 15;
+            const durationMs = duration * 60 * 1000;
+
+            await startJobTracking('Sprinkler');
+            await haStore.callService('switch', 'turn_on', 'switch.sprinkler');
+            setTimeout(async () => {
+              await haStore.callService('switch', 'turn_off', 'switch.sprinkler');
+              await endJobTracking('Sprinkler');
+            }, durationMs);
           }}>
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 6v6"/></svg>
             Single Zone
           </button>
-          {#if shouldWater}
-            <button
-              class="control-btn tertiary"
-              on:click={() => haStore.callService('input_boolean', 'turn_off', 'input_boolean.sprinkler_should_water_today')}
-            >
-              Cancel Today's Watering
-            </button>
-          {/if}
         </div>
-      {/if}
     </div>
 
     <div class="controls-grid">
@@ -1084,93 +902,6 @@
     font-size: 1rem;
     font-weight: 500;
     color: #00d4ff;
-  }
-
-  /* Job Report */
-  .job-report {
-    margin-top: 1.5rem;
-    padding-top: 1.5rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-  }
-
-  .job-report-title {
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.7);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 0.75rem;
-  }
-
-  .job-table {
-    display: flex;
-    flex-direction: column;
-    gap: 0.625rem;
-  }
-
-  .job-row {
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    gap: 1rem;
-    align-items: center;
-    padding: 0.75rem 1rem;
-    background: rgba(255, 255, 255, 0.02);
-    border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
-  }
-
-  .job-session {
-    display: flex;
-    align-items: center;
-  }
-
-  .job-label {
-    font-size: 0.6875rem;
-    font-weight: 500;
-    color: #00d4ff;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    padding: 0.25rem 0.625rem;
-    background: rgba(0, 212, 255, 0.1);
-    border-radius: 6px;
-  }
-
-  .job-time {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .job-date {
-    font-size: 0.8125rem;
-    color: rgba(255, 255, 255, 0.9);
-  }
-
-  .job-duration {
-    font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.5);
-  }
-
-  .job-conditions {
-    text-align: right;
-  }
-
-  .job-temp {
-    font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.6);
-  }
-
-  .job-ai-reason {
-    grid-column: 2 / -1;
-    margin-top: 0.5rem;
-    padding-top: 0.625rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
-  }
-
-  .job-reason-text {
-    font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.6);
-    font-style: italic;
   }
 
   .manual-controls {

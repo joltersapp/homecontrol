@@ -9,6 +9,7 @@ services:
     environment:
       - HA_URL=http://192.168.1.222:8123
       - HA_TOKEN=${HA_TOKEN}
+      - LOCATION=Miami, FL
     restart: unless-stopped
     depends_on:
       - go2rtc
