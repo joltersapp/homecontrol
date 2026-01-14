@@ -9,7 +9,6 @@
   import MasterLights from './components/MasterLights.svelte';
   import PoolControl from './components/PoolControl.svelte';
   import TemperatureControl from './components/TemperatureControl.svelte';
-  import DebugConsole from './components/DebugConsole.svelte';
   import { haStore } from './stores/haStore.js';
   import { version, buildTime, buildNumber } from './version.js';
   
@@ -306,9 +305,6 @@
     {/if}
 
   </div>
-
-  <!-- Debug Console - Always available -->
-  <DebugConsole />
 </main>
 
 <style>
