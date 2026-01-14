@@ -112,13 +112,6 @@ class TemperatureScheduler {
   async checkAndAdjustTemperature() {
     const now = Date.now();
 
-    // Prevent too-frequent adjustments (HVAC needs time to stabilize)
-    if (now - this.lastAdjustmentTime < this.MIN_ADJUSTMENT_INTERVAL) {
-      const waitMinutes = Math.round((this.MIN_ADJUSTMENT_INTERVAL - (now - this.lastAdjustmentTime)) / 60000);
-      console.log(`[TempScheduler] ⏸️  Too soon since last adjustment (wait ${waitMinutes}min), skipping`);
-      return;
-    }
-
     try {
       // Get current office temperature
       const officeTemp = await this.getOfficeTemperature();
@@ -130,11 +123,18 @@ class TemperatureScheduler {
       const hvacMode = climateState.attributes.hvac_mode;
       const hvacAction = climateState.attributes.hvac_action || 'idle';
 
-      // Track HVAC action state changes (AC on/off)
+      // Track HVAC action state changes (AC on/off) - do this EVERY check
       if (this.lastHvacAction !== null && this.lastHvacAction !== hvacAction) {
         await this.logHvacEvent(hvacAction, officeTemp, currentSetpoint);
       }
       this.lastHvacAction = hvacAction;
+
+      // Prevent too-frequent adjustments (HVAC needs time to stabilize)
+      if (now - this.lastAdjustmentTime < this.MIN_ADJUSTMENT_INTERVAL) {
+        const waitMinutes = Math.round((this.MIN_ADJUSTMENT_INTERVAL - (now - this.lastAdjustmentTime)) / 60000);
+        console.log(`[TempScheduler] ⏸️  Too soon since last adjustment (wait ${waitMinutes}min), skipping`);
+        return;
+      }
 
       // Record temperature sample for rate tracking
       this.recordTemperatureSample(officeTemp, currentSetpoint, hvacMode);
@@ -510,9 +510,9 @@ class TemperatureScheduler {
         JSON.stringify(conditions)
       );
 
-      const eventLabel = hvacAction === 'cooling' ? '❄️ AC turned ON' :
-                        hvacAction === 'heating' ? '🔥 Heat turned ON' :
-                        '⏸️ HVAC turned OFF/IDLE';
+      const eventLabel = hvacAction === 'cooling' ? 'AC turned ON' :
+                        hvacAction === 'heating' ? 'Heat turned ON' :
+                        'HVAC turned OFF/IDLE';
 
       console.log(`[TempScheduler] ${eventLabel} (Office: ${officeTemp.toFixed(1)}°F, Setpoint: ${currentSetpoint}°F)`);
 
