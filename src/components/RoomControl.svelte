@@ -156,6 +156,72 @@
     const allLights = getAllRoomLights();
     return allLights.some(id => entities[id]?.state === 'on');
   }
+
+  // Local state for real-time slider updates
+  let localRoomBrightness = null;
+  let brightnessUpdateTimeout = null;
+  let localLightBrightness = {}; // Track individual light brightness
+  let lightBrightnessTimeouts = {};
+  let localGroupBrightness = {}; // Track light group brightness
+  let groupBrightnessTimeouts = {};
+
+  function handleRoomBrightnessInput(value) {
+    localRoomBrightness = parseInt(value);
+
+    // Clear existing timeout
+    if (brightnessUpdateTimeout) {
+      clearTimeout(brightnessUpdateTimeout);
+    }
+
+    // Debounce the actual HA command
+    brightnessUpdateTimeout = setTimeout(() => {
+      setRoomBrightness(value);
+      // Reset local state after command sent
+      setTimeout(() => {
+        localRoomBrightness = null;
+      }, 500);
+    }, 300);
+  }
+
+  function handleLightBrightnessInput(lightId, value) {
+    localLightBrightness[lightId] = parseInt(value);
+    localLightBrightness = localLightBrightness; // Trigger reactivity
+
+    // Clear existing timeout for this light
+    if (lightBrightnessTimeouts[lightId]) {
+      clearTimeout(lightBrightnessTimeouts[lightId]);
+    }
+
+    // Debounce the actual HA command
+    lightBrightnessTimeouts[lightId] = setTimeout(() => {
+      setBrightness(lightId, value);
+      // Reset local state after command sent
+      setTimeout(() => {
+        delete localLightBrightness[lightId];
+        localLightBrightness = localLightBrightness;
+      }, 500);
+    }, 300);
+  }
+
+  function handleGroupBrightnessInput(groupId, value) {
+    localGroupBrightness[groupId] = parseInt(value);
+    localGroupBrightness = localGroupBrightness; // Trigger reactivity
+
+    // Clear existing timeout for this group
+    if (groupBrightnessTimeouts[groupId]) {
+      clearTimeout(groupBrightnessTimeouts[groupId]);
+    }
+
+    // Debounce the actual HA command
+    groupBrightnessTimeouts[groupId] = setTimeout(() => {
+      setLightGroupBrightness(groupId, value);
+      // Reset local state after command sent
+      setTimeout(() => {
+        delete localGroupBrightness[groupId];
+        localGroupBrightness = localGroupBrightness;
+      }, 500);
+    }, 300);
+  }
 </script>
 
 <div class="room-control">
@@ -166,6 +232,7 @@
   <!-- Room Master Dimmer -->
   {#if getAllRoomLights().length > 0}
     {@const roomBrightness = getRoomBrightness()}
+    {@const displayBrightness = localRoomBrightness !== null ? localRoomBrightness : roomBrightness}
     {@const roomLightsOn = isAnyRoomLightOn()}
     <section class="control-section master-dimmer-section">
       <h3 class="section-title">Room Master Dimmer</h3>
@@ -175,7 +242,7 @@
             All {room.name} Lights
           </span>
           <span class="text-xs text-gray-400">
-            {roomBrightness}%
+            {displayBrightness}%
           </span>
         </div>
         {#if roomLightsOn}
@@ -183,7 +250,8 @@
             <button
               class="control-btn"
               on:click={() => {
-                setRoomBrightness(Math.max(0, roomBrightness - 10));
+                const newValue = Math.max(0, displayBrightness - 10);
+                handleRoomBrightnessInput(newValue);
               }}
             >
               −
@@ -192,14 +260,15 @@
               type="range"
               min="0"
               max="100"
-              value={roomBrightness}
-              on:input={(e) => setRoomBrightness(e.target.value)}
+              value={displayBrightness}
+              on:input={(e) => handleRoomBrightnessInput(e.target.value)}
               class="brightness-slider flex-1"
             />
             <button
               class="control-btn"
               on:click={() => {
-                setRoomBrightness(Math.min(100, roomBrightness + 10));
+                const newValue = Math.min(100, displayBrightness + 10);
+                handleRoomBrightnessInput(newValue);
               }}
             >
               +
@@ -238,32 +307,31 @@
                 </button>
               </div>
               {#if entities[lightId].state === 'on' && lightId.startsWith('light.')}
+                {@const entityBrightness = entities[lightId].attributes?.brightness ?
+                  Math.round(entities[lightId].attributes.brightness / 255 * 100) : 100}
+                {@const displayBrightness = localLightBrightness[lightId] !== undefined ?
+                  localLightBrightness[lightId] : entityBrightness}
                 <div class="flex items-center gap-2 mt-2">
-                  <button 
+                  <button
                     class="control-btn"
                     on:click={() => {
-                      const current = entities[lightId].attributes?.brightness ? 
-                        Math.round(entities[lightId].attributes.brightness / 255 * 100) : 100;
-                      setBrightness(lightId, Math.max(0, current - 10));
+                      handleLightBrightnessInput(lightId, Math.max(0, displayBrightness - 10));
                     }}
                   >
                     −
                   </button>
-                  <input 
-                    type="range" 
-                    min="0" 
-                    max="100" 
-                    value={entities[lightId].attributes?.brightness ? 
-                      Math.round(entities[lightId].attributes.brightness / 255 * 100) : 100}
-                    on:input={(e) => debouncedSetBrightness(lightId, e.target.value)}
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={displayBrightness}
+                    on:input={(e) => handleLightBrightnessInput(lightId, e.target.value)}
                     class="brightness-slider flex-1"
                   />
-                  <button 
+                  <button
                     class="control-btn"
                     on:click={() => {
-                      const current = entities[lightId].attributes?.brightness ? 
-                        Math.round(entities[lightId].attributes.brightness / 255 * 100) : 100;
-                      setBrightness(lightId, Math.min(100, current + 10));
+                      handleLightBrightnessInput(lightId, Math.min(100, displayBrightness + 10));
                     }}
                   >
                     +
@@ -304,13 +372,15 @@
             </div>
 
             {#if groupState.isOn && groupState.hasLights}
+              {@const displayBrightness = localGroupBrightness[lightGroup.name] !== undefined ?
+                localGroupBrightness[lightGroup.name] : groupState.brightness}
               <!-- Brightness Control -->
               <div class="flex items-center gap-2 mt-3">
                 <span class="text-xs text-gray-400 min-w-[60px]">Brightness</span>
                 <button
                   class="control-btn"
                   on:click={() => {
-                    setLightGroupBrightness(lightGroup, Math.max(0, groupState.brightness - 10));
+                    handleGroupBrightnessInput(lightGroup, Math.max(0, displayBrightness - 10));
                   }}
                 >
                   −
@@ -319,19 +389,19 @@
                   type="range"
                   min="0"
                   max="100"
-                  value={groupState.brightness}
-                  on:input={(e) => debouncedSetLightGroupBrightness(lightGroup, e.target.value)}
+                  value={displayBrightness}
+                  on:input={(e) => handleGroupBrightnessInput(lightGroup, e.target.value)}
                   class="brightness-slider flex-1"
                 />
                 <button
                   class="control-btn"
                   on:click={() => {
-                    setLightGroupBrightness(lightGroup, Math.min(100, groupState.brightness + 10));
+                    handleGroupBrightnessInput(lightGroup, Math.min(100, displayBrightness + 10));
                   }}
                 >
                   +
                 </button>
-                <span class="text-xs text-gray-400 min-w-[40px]">{groupState.brightness}%</span>
+                <span class="text-xs text-gray-400 min-w-[40px]">{displayBrightness}%</span>
               </div>
 
               <!-- Color Control -->
