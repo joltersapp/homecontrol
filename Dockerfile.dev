@@ -1,7 +1,7 @@
 FROM node:20-alpine
 
-# Install build dependencies for native modules
-RUN apk add --no-cache python3 make g++
+# Install build dependencies for native modules and timezone data
+RUN apk add --no-cache python3 make g++ tzdata
 
 WORKDIR /app
 

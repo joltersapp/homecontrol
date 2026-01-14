@@ -86,6 +86,9 @@ class PoolScheduler {
     // Initial calculation on startup
     await this.calculateSchedule();
 
+    // Check for active job and recover if needed
+    await this.recoverActiveJob();
+
     console.log('[PoolScheduler] ✓ Started successfully');
     console.log('[PoolScheduler] 📅 Cron jobs:');
     console.log('[PoolScheduler]    - 5:00 AM: Daily recalculation');
@@ -268,12 +271,16 @@ class PoolScheduler {
       const stopDelayMs = this.currentSchedule.hours * 60 * 60 * 1000;
       if (this.stopTimer) clearTimeout(this.stopTimer);
 
+      const endTime = new Date(Date.now() + stopDelayMs);
+
+      // Save active job state for recovery after restarts
+      await this.saveActiveJob(endTime);
+
       this.stopTimer = setTimeout(async () => {
         console.log(`[PoolScheduler] ⏱️  Session complete (${this.currentSchedule.hours}hrs)`);
         await this.stopPumpSession();
       }, stopDelayMs);
 
-      const endTime = new Date(Date.now() + stopDelayMs);
       console.log(`[PoolScheduler] ✓ Pump started - will run until ${this.formatTime(endTime)} (${this.currentSchedule.hours}hrs)`);
       console.log(`[PoolScheduler] 💡 Running during peak sun to combat UV chlorine depletion`);
 
@@ -289,6 +296,7 @@ class PoolScheduler {
     try {
       await this.controlPump('off');
       await this.endJobTracking();
+      await this.clearActiveJob();  // Clear saved state
 
       if (this.stopTimer) {
         clearTimeout(this.stopTimer);
@@ -441,6 +449,110 @@ class PoolScheduler {
       minute: '2-digit',
       timeZone: 'America/New_York'
     });
+  }
+
+  /**
+   * Save active job state to survive restarts
+   */
+  async saveActiveJob(endTime) {
+    try {
+      const stmt = db.prepare(`
+        INSERT OR REPLACE INTO schedules (device, config, updated_at)
+        VALUES ('Pool Pump Active Job', ?, datetime('now', 'localtime'))
+      `);
+
+      const activeJobState = {
+        jobId: this.currentJobId,
+        endTime: endTime.toISOString(),
+        startedAt: new Date().toISOString()
+      };
+
+      stmt.run(JSON.stringify(activeJobState));
+      console.log(`[PoolScheduler] 💾 Saved active job state (ends at ${this.formatTime(endTime)})`);
+
+    } catch (error) {
+      console.error('[PoolScheduler] ⚠️  Error saving active job:', error);
+    }
+  }
+
+  /**
+   * Recover active job after restart
+   */
+  async recoverActiveJob() {
+    try {
+      // Check if there's a saved active job
+      const stmt = db.prepare(`
+        SELECT config FROM schedules WHERE device = 'Pool Pump Active Job'
+      `);
+
+      const result = stmt.get();
+      if (!result || !result.config) {
+        console.log('[PoolScheduler] No active job to recover');
+        return;
+      }
+
+      const activeJobState = JSON.parse(result.config);
+      const endTime = new Date(activeJobState.endTime);
+      const now = new Date();
+
+      console.log(`[PoolScheduler] 🔄 Found saved job (ID: ${activeJobState.jobId}, scheduled end: ${this.formatTime(endTime)})`);
+
+      // Check if job has expired
+      if (now >= endTime) {
+        console.log(`[PoolScheduler] ⏱️  Job expired ${Math.round((now - endTime) / 60000)} minutes ago`);
+
+        // Turn off pump if it's still running
+        try {
+          await this.controlPump('off');
+          console.log('[PoolScheduler] ✓ Turned off pump (expired job)');
+        } catch (error) {
+          console.error('[PoolScheduler] ⚠️  Error turning off pump:', error.message);
+        }
+
+        // End job tracking if still active
+        this.currentJobId = activeJobState.jobId;
+        await this.endJobTracking();
+        await this.clearActiveJob();
+        return;
+      }
+
+      // Job is still valid - calculate remaining time
+      const remainingMs = endTime - now;
+      const remainingMinutes = Math.round(remainingMs / 60000);
+
+      console.log(`[PoolScheduler] ⏰ Recovering job - ${remainingMinutes} minutes remaining`);
+
+      // Restore job ID
+      this.currentJobId = activeJobState.jobId;
+
+      // Recreate the stop timer
+      this.stopTimer = setTimeout(async () => {
+        console.log(`[PoolScheduler] ⏱️  Session complete (recovered job)`);
+        await this.stopPumpSession();
+      }, remainingMs);
+
+      console.log(`[PoolScheduler] ✓ Job recovered - pump will stop at ${this.formatTime(endTime)}`);
+
+    } catch (error) {
+      console.error('[PoolScheduler] ⚠️  Error recovering active job:', error);
+    }
+  }
+
+  /**
+   * Clear saved active job state
+   */
+  async clearActiveJob() {
+    try {
+      const stmt = db.prepare(`
+        DELETE FROM schedules WHERE device = 'Pool Pump Active Job'
+      `);
+
+      stmt.run();
+      console.log('[PoolScheduler] 🗑️  Cleared active job state');
+
+    } catch (error) {
+      console.error('[PoolScheduler] ⚠️  Error clearing active job:', error);
+    }
   }
 
   /**

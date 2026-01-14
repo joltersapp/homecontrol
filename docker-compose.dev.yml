@@ -20,9 +20,10 @@ services:
     environment:
       - HA_URL=http://192.168.1.222:8123
       - HA_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJkMTY4YjhmZDU1YTY0YzhkYmJhNDY3ODZkNTM1MWU5MyIsImlhdCI6MTc2MzU5MTMwMCwiZXhwIjoyMDc4OTUxMzAwfQ.Vyz4iRVr93i-LXo_6sg-nENo-TgTmrxPa1vhXDjWVLs
-      - GEMINI_API_KEY=AIzaSyB3MR3Qs23ksBd9lBSxh0OnDhzgmNrMTag
+      - GEMINI_API_KEY=AIzaSyCicbZQIn-PRd9N0VNZCGNqmsrLW4ewN6Q
       - LOCATION=Miami, FL
       - NODE_OPTIONS=--max-old-space-size=192
+      - TZ=America/New_York
     restart: unless-stopped
     depends_on:
       - go2rtc

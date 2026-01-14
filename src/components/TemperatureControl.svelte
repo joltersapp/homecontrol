@@ -76,7 +76,7 @@
       const result = await api.getTemperatureHistory(30);
       adjustmentHistory = result.jobs || [];
 
-      // Build temperature history from adjustments
+      // Build temperature history from adjustments and monitoring logs
       temperatureHistory = adjustmentHistory
         .filter(job => job.conditions)
         .map(job => {
@@ -84,19 +84,40 @@
             const conditions = typeof job.conditions === 'string'
               ? JSON.parse(job.conditions)
               : job.conditions;
+
+            // Handle both adjustment logs and monitoring logs
+            const oldSetpoint = conditions.oldSetpoint !== undefined
+              ? parseFloat(conditions.oldSetpoint)
+              : parseFloat(conditions.setpoint);
+            const newSetpoint = conditions.newSetpoint !== undefined
+              ? parseFloat(conditions.newSetpoint)
+              : parseFloat(conditions.setpoint);
+
+            // Parse timestamp as local time (database stores local time)
+            // Format: "2026-01-13 11:32:31"
+            console.log('Raw start_time:', job.start_time);
+
+            // Parse manually to ensure it's interpreted as local time, not UTC
+            const [datePart, timePart] = job.start_time.split(' ');
+            const [year, month, day] = datePart.split('-').map(Number);
+            const [hour, minute, second] = timePart.split(':').map(Number);
+            const timestamp = new Date(year, month - 1, day, hour, minute, second);
+
+            console.log('Parsed timestamp:', timestamp.toString(), 'ISO:', timestamp.toISOString());
+
             return {
-              timestamp: new Date(job.start_time),
+              timestamp,
               officeTemp: parseFloat(conditions.officeTemp),
               targetTemp: parseFloat(conditions.targetTemp),
-              oldSetpoint: parseFloat(conditions.oldSetpoint),
-              newSetpoint: parseFloat(conditions.newSetpoint),
-              action: conditions.action
+              oldSetpoint,
+              newSetpoint,
+              action: conditions.action || 'monitoring'
             };
           } catch (e) {
             return null;
           }
         })
-        .filter(item => item !== null)
+        .filter(item => item !== null && !isNaN(item.officeTemp))
         .reverse(); // Most recent first
 
     } catch (error) {
@@ -196,7 +217,7 @@
   $: graphPath = generateGraphPath(temperatureHistory);
 
   function generateGraphPath(history) {
-    if (history.length < 2) return { office: '', target: '', setpoint: '' };
+    if (history.length < 2) return { office: '', target: '', setpoint: '', timestamps: [] };
 
     const width = 600;
     const height = 200;
@@ -229,7 +250,23 @@
       return i === 0 ? `M ${x},${y}` : `L ${x},${y}`;
     }).join(' ');
 
-    return { office: officePath, target: targetPath, setpoint: setpointPath, minTemp, maxTemp };
+    // Generate timestamp labels (show every 3rd point or start/end)
+    const timestamps = history.map((h, i) => {
+      const x = padding + i * xScale;
+      const showLabel = i === 0 || i === history.length - 1 || i % 3 === 0;
+      if (!showLabel) return null;
+
+      const date = new Date(h.timestamp);
+      const label = date.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+
+      return { x, label };
+    }).filter(t => t !== null);
+
+    return { office: officePath, target: targetPath, setpoint: setpointPath, minTemp, maxTemp, timestamps };
   }
 </script>
 
@@ -374,30 +411,46 @@
       Temperature History
     </h3>
     <div class="graph-wrapper">
-      <svg viewBox="0 0 600 200" class="temp-graph">
+      <svg viewBox="0 0 600 220" class="temp-graph">
         <!-- Grid lines -->
-        <line x1="40" y1="40" x2="560" y2="40" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
-        <line x1="40" y1="120" x2="560" y2="120" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
-        <line x1="40" y1="160" x2="560" y2="160" stroke="rgba(255,255,255,0.1)" stroke-width="1" />
+        <line x1="40" y1="40" x2="560" y2="40" stroke="rgba(0, 212, 255, 0.15)" stroke-width="1" />
+        <line x1="40" y1="100" x2="560" y2="100" stroke="rgba(0, 212, 255, 0.1)" stroke-width="1" />
+        <line x1="40" y1="160" x2="560" y2="160" stroke="rgba(0, 212, 255, 0.15)" stroke-width="1" />
 
         <!-- Target line (dashed) -->
         {#if graphPath.target}
-          <path d={graphPath.target} fill="none" stroke="#00d4ff" stroke-width="2" stroke-dasharray="5,5" opacity="0.5" />
+          <path d={graphPath.target} fill="none" stroke="#00d4ff" stroke-width="2.5" stroke-dasharray="6,4" opacity="0.6" />
         {/if}
 
         <!-- Setpoint line -->
         {#if graphPath.setpoint}
-          <path d={graphPath.setpoint} fill="none" stroke="#fbbf24" stroke-width="2" />
+          <path d={graphPath.setpoint} fill="none" stroke="#fbbf24" stroke-width="2.5" opacity="0.9" />
         {/if}
 
         <!-- Office temp line -->
         {#if graphPath.office}
-          <path d={graphPath.office} fill="none" stroke="#00ff88" stroke-width="3" />
+          <path d={graphPath.office} fill="none" stroke="#00ff88" stroke-width="3" style="filter: drop-shadow(0 0 4px rgba(0, 255, 136, 0.5));" />
         {/if}
 
-        <!-- Labels -->
-        <text x="10" y="45" fill="rgba(255,255,255,0.5)" font-size="10">{graphPath.maxTemp?.toFixed(0)}°</text>
-        <text x="10" y="165" fill="rgba(255,255,255,0.5)" font-size="10">{graphPath.minTemp?.toFixed(0)}°</text>
+        <!-- Y-axis labels -->
+        <text x="10" y="45" fill="rgba(0, 212, 255, 0.7)" font-size="11" font-family="sans-serif">{graphPath.maxTemp?.toFixed(0)}°</text>
+        <text x="10" y="165" fill="rgba(0, 212, 255, 0.7)" font-size="11" font-family="sans-serif">{graphPath.minTemp?.toFixed(0)}°</text>
+
+        <!-- X-axis timestamps -->
+        {#if graphPath.timestamps}
+          {#each graphPath.timestamps as timestamp}
+            <text
+              x={timestamp.x}
+              y="190"
+              fill="rgba(0, 212, 255, 0.6)"
+              font-size="9"
+              font-family="sans-serif"
+              text-anchor="middle"
+            >
+              {timestamp.label}
+            </text>
+          {/each}
+        {/if}
       </svg>
 
       <!-- Legend -->
@@ -438,17 +491,48 @@
             </div>
 
             <div class="history-details">
-              <div class="history-action {conditions.action === 'increase' ? 'increase' : 'decrease'}">
-                {conditions.action === 'increase' ? '↑' : '↓'}
-                {conditions.action === 'increase' ? 'Increased' : 'Decreased'}
-              </div>
-              <div class="history-temps">
-                Office: {conditions.officeTemp}°F →
-                Setpoint: {conditions.oldSetpoint}°F → {conditions.newSetpoint}°F
-              </div>
-              <div class="history-delta">
-                Delta: {conditions.delta}°F from target
-              </div>
+              {#if conditions.action === 'ac_on'}
+                <div class="history-action hvac-event ac-on">
+                  ❄️ AC Turned ON
+                </div>
+                <div class="history-temps">
+                  Office: {conditions.officeTemp}°F | Setpoint: {conditions.setpoint}°F
+                </div>
+              {:else if conditions.action === 'heat_on'}
+                <div class="history-action hvac-event heat-on">
+                  🔥 Heat Turned ON
+                </div>
+                <div class="history-temps">
+                  Office: {conditions.officeTemp}°F | Setpoint: {conditions.setpoint}°F
+                </div>
+              {:else if conditions.action === 'hvac_idle' || conditions.action === 'hvac_off'}
+                <div class="history-action hvac-event hvac-off">
+                  ⏸️ HVAC Turned OFF
+                </div>
+                <div class="history-temps">
+                  Office: {conditions.officeTemp}°F | Setpoint: {conditions.setpoint}°F
+                </div>
+              {:else}
+                <div class="history-action {conditions.action === 'increase' ? 'increase' : 'decrease'}">
+                  {conditions.action === 'increase' ? '↑' : '↓'}
+                  {conditions.action === 'increase' ? 'Increased' : 'Decreased'}
+                </div>
+                <div class="history-temps">
+                  Office: {conditions.officeTemp}°F →
+                  {#if conditions.oldSetpoint !== undefined && conditions.newSetpoint !== undefined}
+                    Setpoint: {conditions.oldSetpoint}°F → {conditions.newSetpoint}°F
+                  {:else if conditions.setpoint !== undefined}
+                    Setpoint: {conditions.setpoint}°F
+                  {:else}
+                    Setpoint: N/A
+                  {/if}
+                </div>
+                {#if conditions.delta !== undefined}
+                <div class="history-delta">
+                  Delta: {conditions.delta}°F from target
+                </div>
+                {/if}
+              {/if}
             </div>
           </div>
         {/each}
@@ -798,6 +882,22 @@
 
   .history-action.decrease {
     color: #00ff88;
+  }
+
+  .history-action.hvac-event {
+    font-weight: 600;
+  }
+
+  .history-action.ac-on {
+    color: #4fc3f7;
+  }
+
+  .history-action.heat-on {
+    color: #ff6b6b;
+  }
+
+  .history-action.hvac-off {
+    color: #9e9e9e;
   }
 
   .history-temps {

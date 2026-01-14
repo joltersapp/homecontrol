@@ -23,10 +23,12 @@ class TemperatureScheduler {
   constructor() {
     this.enabled = false;
     this.TARGET_TEMP = 73;           // Target office temperature (°F)
-    this.TEMP_THRESHOLD = 1.5;       // Act when ±1.5°F from target
+    this.TEMP_THRESHOLD = 0.5;       // Act when ±0.5°F from target
     this.ADJUSTMENT_STEP = 1;        // Adjust by 1°F at a time
     this.MIN_ADJUSTMENT_INTERVAL = 15 * 60 * 1000; // 15 minutes between adjustments
     this.lastAdjustmentTime = 0;
+    this.lastMonitoringLog = 0;
+    this.lastHvacAction = null;      // Track AC on/off state
     this.cronJobs = [];
     this.currentJobId = null;
 
@@ -126,6 +128,13 @@ class TemperatureScheduler {
       const currentSetpoint = climateState.attributes.temperature;
       const currentTemp = climateState.attributes.current_temperature;
       const hvacMode = climateState.attributes.hvac_mode;
+      const hvacAction = climateState.attributes.hvac_action || 'idle';
+
+      // Track HVAC action state changes (AC on/off)
+      if (this.lastHvacAction !== null && this.lastHvacAction !== hvacAction) {
+        await this.logHvacEvent(hvacAction, officeTemp, currentSetpoint);
+      }
+      this.lastHvacAction = hvacAction;
 
       // Record temperature sample for rate tracking
       this.recordTemperatureSample(officeTemp, currentSetpoint, hvacMode);
@@ -146,6 +155,13 @@ class TemperatureScheduler {
       // Only adjust if outside acceptable threshold
       if (Math.abs(delta) < this.TEMP_THRESHOLD) {
         console.log('[TempScheduler] ✓ Temperature within acceptable range');
+
+        // Log monitoring data (every 10 minutes to avoid too much data)
+        if (!this.lastMonitoringLog || now - this.lastMonitoringLog >= 10 * 60 * 1000) {
+          await this.logMonitoring(officeTemp, currentSetpoint, delta, rate15min, rate30min);
+          this.lastMonitoringLog = now;
+        }
+
         return;
       }
 
@@ -160,7 +176,8 @@ class TemperatureScheduler {
         console.log(`[TempScheduler] ❄️  Office too cold, increasing setpoint ${currentSetpoint}°F → ${newSetpoint}°F`);
       } else {
         // Office is too hot, decrease setpoint
-        newSetpoint = Math.max(currentSetpoint - this.ADJUSTMENT_STEP, this.MIN_SETPOINT);
+        // Never set AC below target temperature to prevent overcooling
+        newSetpoint = Math.max(currentSetpoint - this.ADJUSTMENT_STEP, this.TARGET_TEMP);
         action = 'decrease';
         console.log(`[TempScheduler] 🔥 Office too warm, decreasing setpoint ${currentSetpoint}°F → ${newSetpoint}°F`);
       }
@@ -418,6 +435,89 @@ class TemperatureScheduler {
 
     } catch (error) {
       console.error('[TempScheduler] ⚠️  Error logging adjustment:', error);
+    }
+  }
+
+  /**
+   * Log temperature monitoring to database (when no adjustment is needed)
+   * @param {number} officeTemp - Current office temperature
+   * @param {number} currentSetpoint - Current thermostat setpoint
+   * @param {number} delta - Temperature delta from target
+   * @param {Object} rate15min - Temperature change rate over 15 minutes
+   * @param {Object} rate30min - Temperature change rate over 30 minutes
+   */
+  async logMonitoring(officeTemp, currentSetpoint, delta, rate15min, rate30min) {
+    try {
+      const conditions = {
+        officeTemp: officeTemp.toFixed(1),
+        targetTemp: this.TARGET_TEMP,
+        delta: delta.toFixed(2),
+        setpoint: currentSetpoint,
+        tempChangeRate15min: rate15min.rate,
+        sampleSize15min: rate15min.sampleSize,
+        confidence15min: rate15min.confidence,
+        tempChangeRate30min: rate30min.rate,
+        sampleSize30min: rate30min.sampleSize,
+        confidence30min: rate30min.confidence,
+        timestamp: new Date().toISOString()
+      };
+
+      const stmt = db.prepare(`
+        INSERT INTO jobs (device, session, start_time, end_time, duration, conditions)
+        VALUES (?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'), 0, ?)
+      `);
+
+      stmt.run(
+        'Office Temperature',
+        'Temperature Monitoring',
+        JSON.stringify(conditions)
+      );
+
+      console.log('[TempScheduler] 📝 Monitoring data logged to database');
+
+    } catch (error) {
+      console.error('[TempScheduler] ⚠️  Error logging monitoring data:', error);
+    }
+  }
+
+  /**
+   * Log HVAC action state changes (AC/Heat on/off)
+   * @param {string} hvacAction - Current HVAC action (cooling, heating, idle, off)
+   * @param {number} officeTemp - Current office temperature
+   * @param {number} currentSetpoint - Current thermostat setpoint
+   */
+  async logHvacEvent(hvacAction, officeTemp, currentSetpoint) {
+    try {
+      const conditions = {
+        hvacAction,
+        officeTemp: officeTemp.toFixed(1),
+        setpoint: currentSetpoint,
+        targetTemp: this.TARGET_TEMP,
+        action: hvacAction === 'cooling' ? 'ac_on' :
+                hvacAction === 'heating' ? 'heat_on' :
+                hvacAction === 'idle' ? 'hvac_idle' : 'hvac_off',
+        timestamp: new Date().toISOString()
+      };
+
+      const stmt = db.prepare(`
+        INSERT INTO jobs (device, session, start_time, end_time, duration, conditions)
+        VALUES (?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'), 0, ?)
+      `);
+
+      stmt.run(
+        'Office Temperature',
+        'HVAC Event',
+        JSON.stringify(conditions)
+      );
+
+      const eventLabel = hvacAction === 'cooling' ? '❄️ AC turned ON' :
+                        hvacAction === 'heating' ? '🔥 Heat turned ON' :
+                        '⏸️ HVAC turned OFF/IDLE';
+
+      console.log(`[TempScheduler] ${eventLabel} (Office: ${officeTemp.toFixed(1)}°F, Setpoint: ${currentSetpoint}°F)`);
+
+    } catch (error) {
+      console.error('[TempScheduler] ⚠️  Error logging HVAC event:', error);
     }
   }
 
