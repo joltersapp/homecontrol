@@ -1,37 +1,24 @@
 <script>
   import { spring } from 'svelte/motion';
-  import { onMount } from 'svelte';
   import { createEventDispatcher } from 'svelte';
-  
+
   export let temperature = 72;
   export let humidity = 45;
   export let targetTemp = 70;
-  
+
   const dispatch = createEventDispatcher();
-  
+
   const temp = spring(temperature);
   const hum = spring(humidity);
-  
+
   $: temp.set(temperature);
   $: hum.set(humidity);
-  
-  let rotation = 0;
-  
-  onMount(() => {
-    const interval = setInterval(() => {
-      rotation += 0.5;
-    }, 50);
-    return () => clearInterval(interval);
-  });
 </script>
 
 <div class="orb-container">
   <div class="orb-glass">
     <!-- Animated gradient background -->
-    <div 
-      class="absolute inset-0 rounded-full"
-      style="background: conic-gradient(from {rotation}deg, #00d4ff, #0891b2, #0284c7, #00d4ff); opacity: 0.25; filter: blur(25px);"
-    ></div>
+    <div class="animated-gradient"></div>
     
     <!-- Inner orb -->
     <div class="absolute inset-4 rounded-full bg-black/40 backdrop-blur-sm flex flex-col items-center justify-center">
@@ -114,8 +101,27 @@
     backdrop-filter: blur(20px);
     border-radius: 50%;
     border: 1px solid rgba(0, 212, 255, 0.1);
-    box-shadow: 
+    box-shadow:
       0 25px 50px -12px rgba(0, 0, 0, 0.4),
       inset 0 0 30px rgba(0, 212, 255, 0.05);
+  }
+
+  .animated-gradient {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: conic-gradient(from 0deg, #00d4ff, #0891b2, #0284c7, #00d4ff);
+    opacity: 0.25;
+    filter: blur(25px);
+    animation: rotate 40s linear infinite;
+  }
+
+  @keyframes rotate {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>
