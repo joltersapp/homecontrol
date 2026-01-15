@@ -185,10 +185,6 @@
 </script>
 
 <div class="audio-control">
-  <h2 class="text-2xl font-light mb-8 text-gray-300 uppercase tracking-wider text-center">
-    Whole Home Audio Control
-  </h2>
-
   <AudioGroupingPanel
     {sonosDevices}
     {entities}

@@ -318,10 +318,6 @@
 </script>
 
 <div class="pool-control">
-  <h2 class="text-2xl font-light mb-8 text-gray-300 uppercase tracking-wider text-center">
-    Outside
-  </h2>
-
   {#if !scriptsConfigured}
     <PoolSetupMessage />
   {:else}

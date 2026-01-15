@@ -165,14 +165,8 @@
   let localGroupBrightness = {}; // Track light group brightness
   let groupBrightnessTimeouts = {};
 
-  // Debug reactive statements
-  $: console.log('[DEBUG] localRoomBrightness changed:', localRoomBrightness);
-  $: console.log('[DEBUG] localLightBrightness changed:', localLightBrightness);
-  $: console.log('[DEBUG] localGroupBrightness changed:', localGroupBrightness);
-
   function handleRoomBrightnessInput(value) {
     localRoomBrightness = parseInt(value);
-    console.log('[DEBUG] Room brightness input:', value, '-> localRoomBrightness:', localRoomBrightness);
 
     // Clear existing timeout
     if (brightnessUpdateTimeout) {
@@ -181,11 +175,9 @@
 
     // Debounce the actual HA command
     brightnessUpdateTimeout = setTimeout(() => {
-      console.log('[DEBUG] Sending room brightness to HA:', value);
       setRoomBrightness(value);
       // Reset local state after command sent
       setTimeout(() => {
-        console.log('[DEBUG] Resetting localRoomBrightness to null');
         localRoomBrightness = null;
       }, 500);
     }, 300);
@@ -194,7 +186,6 @@
   function handleLightBrightnessInput(lightId, value) {
     localLightBrightness[lightId] = parseInt(value);
     localLightBrightness = localLightBrightness; // Trigger reactivity
-    console.log('[DEBUG] Light brightness input:', lightId, value, '-> localLightBrightness:', localLightBrightness[lightId]);
 
     // Clear existing timeout for this light
     if (lightBrightnessTimeouts[lightId]) {
@@ -203,11 +194,9 @@
 
     // Debounce the actual HA command
     lightBrightnessTimeouts[lightId] = setTimeout(() => {
-      console.log('[DEBUG] Sending light brightness to HA:', lightId, value);
       setBrightness(lightId, value);
       // Reset local state after command sent
       setTimeout(() => {
-        console.log('[DEBUG] Resetting localLightBrightness for', lightId);
         delete localLightBrightness[lightId];
         localLightBrightness = localLightBrightness;
       }, 500);
@@ -217,7 +206,6 @@
   function handleGroupBrightnessInput(groupId, value) {
     localGroupBrightness[groupId] = parseInt(value);
     localGroupBrightness = localGroupBrightness; // Trigger reactivity
-    console.log('[DEBUG] Group brightness input:', groupId, value, '-> localGroupBrightness:', localGroupBrightness[groupId]);
 
     // Clear existing timeout for this group
     if (groupBrightnessTimeouts[groupId]) {
@@ -226,11 +214,9 @@
 
     // Debounce the actual HA command
     groupBrightnessTimeouts[groupId] = setTimeout(() => {
-      console.log('[DEBUG] Sending group brightness to HA:', groupId, value);
       setLightGroupBrightness(groupId, value);
       // Reset local state after command sent
       setTimeout(() => {
-        console.log('[DEBUG] Resetting localGroupBrightness for', groupId);
         delete localGroupBrightness[groupId];
         localGroupBrightness = localGroupBrightness;
       }, 500);
@@ -239,7 +225,6 @@
 </script>
 
 <div class="room-control">
-  <div class="text-xs text-red-500 mb-2">DEBUG MODE ACTIVE v2</div>
   <h2 class="text-lg font-light mb-6 text-gray-300 uppercase tracking-wider">
     {room.name} Controls
   </h2>

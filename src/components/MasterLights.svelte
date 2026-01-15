@@ -121,10 +121,6 @@
 </script>
 
 <div class="master-lights">
-  <h2 class="text-2xl font-light mb-8 text-gray-300 uppercase tracking-wider text-center">
-    Light Controls
-  </h2>
-
   <!-- Master Control -->
   <div class="master-control glass mb-8">
     <div class="flex items-center justify-between">

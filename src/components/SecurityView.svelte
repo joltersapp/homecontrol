@@ -203,10 +203,6 @@
 </script>
 
 <div class="security-view">
-  <h2 class="text-2xl font-light mb-8 text-gray-300 uppercase tracking-wider text-center">
-    Security Cameras
-  </h2>
-  
   <!-- Debug info -->
   {#if !entities || Object.keys(entities).length === 0}
     <div class="text-center text-gray-500 mb-4">

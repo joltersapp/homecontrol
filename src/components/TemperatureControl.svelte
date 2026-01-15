@@ -200,10 +200,6 @@
 </script>
 
 <div class="temperature-control">
-  <h2 class="text-2xl font-light mb-8 text-gray-300 uppercase tracking-wider text-center">
-    Smart Climate Control
-  </h2>
-
   <TemperatureStatusCards
     {currentTemp}
     {hallwayTemp}
