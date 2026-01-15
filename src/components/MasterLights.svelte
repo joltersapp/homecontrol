@@ -93,6 +93,31 @@
       }
     });
   }
+
+  // Local state for real-time slider updates
+  let localRoomBrightness = {}; // Track each room's brightness
+  let roomBrightnessTimeouts = {};
+
+  function handleRoomBrightnessInput(room, value) {
+    const brightness = parseInt(value);
+    localRoomBrightness[room.name] = brightness;
+    localRoomBrightness = localRoomBrightness; // Trigger reactivity
+
+    // Clear existing timeout for this room
+    if (roomBrightnessTimeouts[room.name]) {
+      clearTimeout(roomBrightnessTimeouts[room.name]);
+    }
+
+    // Debounce the actual HA command
+    roomBrightnessTimeouts[room.name] = setTimeout(() => {
+      setRoomBrightness(room, brightness);
+      // Reset local state after command sent
+      setTimeout(() => {
+        delete localRoomBrightness[room.name];
+        localRoomBrightness = localRoomBrightness;
+      }, 500);
+    }, 300);
+  }
 </script>
 
 <div class="master-lights">
@@ -121,7 +146,6 @@
     {#each rooms as room}
       {@const roomLights = getRoomLightEntities(room)}
       {@const dimmableLights = getRoomDimmableLights(room)}
-      {@const roomBrightness = getRoomBrightness(room)}
       {#if roomLights.length > 0}
         <div class="room-card glass">
           <div class="flex items-center justify-between mb-3">
@@ -139,13 +163,17 @@
             <div class="room-dimmer mb-3">
               <div class="flex items-center justify-between mb-2">
                 <span class="dimmer-label">Room Brightness</span>
-                <span class="brightness-value">{roomBrightness}%</span>
+                <span class="brightness-value">
+                  {localRoomBrightness[room.name] !== undefined ? localRoomBrightness[room.name] : getRoomBrightness(room)}%
+                </span>
               </div>
               <div class="dimmer-controls">
                 <button
                   class="dimmer-button"
-                  on:click={() => setRoomBrightness(room, Math.max(0, roomBrightness - 10))}
-                  disabled={roomBrightness === 0}
+                  on:click={() => {
+                    const current = localRoomBrightness[room.name] !== undefined ? localRoomBrightness[room.name] : getRoomBrightness(room);
+                    handleRoomBrightnessInput(room, Math.max(0, current - 10));
+                  }}
                 >
                   −
                 </button>
@@ -153,14 +181,16 @@
                   type="range"
                   min="0"
                   max="100"
-                  value={roomBrightness}
-                  on:input={(e) => setRoomBrightness(room, parseInt(e.target.value))}
+                  value={localRoomBrightness[room.name] !== undefined ? localRoomBrightness[room.name] : getRoomBrightness(room)}
+                  on:input={(e) => handleRoomBrightnessInput(room, e.target.value)}
                   class="dimmer-slider"
                 />
                 <button
                   class="dimmer-button"
-                  on:click={() => setRoomBrightness(room, Math.min(100, roomBrightness + 10))}
-                  disabled={roomBrightness === 100}
+                  on:click={() => {
+                    const current = localRoomBrightness[room.name] !== undefined ? localRoomBrightness[room.name] : getRoomBrightness(room);
+                    handleRoomBrightnessInput(room, Math.min(100, current + 10));
+                  }}
                 >
                   +
                 </button>
